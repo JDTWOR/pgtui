@@ -98,11 +98,12 @@ func (d *QueryDelegate) handleQueryResult(msg messages.QueryResultMsg, app AppAc
 	// Record query to history store for later review
 	app.RecordQueryHistory(msg.SQL, msg.Result)
 
-	// DML queries (no columns returned): show a compact toast, refresh
-	// affected table tabs, and skip creating a full result tab.
+	// DML queries (no columns returned): remove the pending tab, show a
+	// success toast, refresh affected table tabs, and navigate to the
+	// matching table tab (or tree if none exists).
 	if len(msg.Result.Columns) == 0 {
-		// Cancel the pending tab (don't show a useless "no data" tab)
-		app.CancelPendingQuery()
+		// Remove the pending tab entirely (no "Cancelled" state)
+		app.RemovePendingQuery()
 
 		// Show a brief success toast with operation details
 		app.ShowSuccessToast(d.formatDMLSummary(msg.SQL, msg.Result))
@@ -110,9 +111,8 @@ func (d *QueryDelegate) handleQueryResult(msg messages.QueryResultMsg, app AppAc
 		// Refresh any affected table data tabs in background
 		cmds := d.refreshTabsForDML(msg.SQL, app)
 
-		// Focus tree so user can navigate to the refreshed table
-		app.SetFocusArea(models.FocusTreeView)
-		app.UpdatePanelStyles()
+		// Try to navigate to an affected table tab; fall back to tree
+		d.navigateToAffectedTable(msg.SQL, app)
 
 		if cmds != nil {
 			return true, cmds
@@ -200,6 +200,48 @@ func (d *QueryDelegate) refreshTabsForDML(sql string, app AppAccess) tea.Cmd {
 		return nil
 	}
 	return tea.Batch(cmds...)
+}
+
+// navigateToAffectedTable looks for an existing TabTypeTableData tab matching
+// the DML's affected table and switches focus to it. Falls back to tree view.
+func (d *QueryDelegate) navigateToAffectedTable(sql string, app AppAccess) {
+	names := d.extractAffectedTableNames(sql)
+	if len(names) == 0 {
+		app.SetFocusArea(models.FocusTreeView)
+		app.UpdatePanelStyles()
+		return
+	}
+
+	resultTabs := app.GetResultTabs()
+	for _, name := range names {
+		var objectID string
+		if strings.Contains(name, ".") {
+			objectID = name
+		} else {
+			// Try to match a tab whose ObjectID ends with ".<name>"
+			for _, tab := range resultTabs.GetAllTabs() {
+				if tab.Type == components.TabTypeTableData && strings.HasSuffix(tab.ObjectID, "."+name) {
+					objectID = tab.ObjectID
+					break
+				}
+			}
+		}
+
+		if objectID != "" {
+			for i, tab := range resultTabs.GetAllTabs() {
+				if tab.ObjectID == objectID && tab.Type == components.TabTypeTableData {
+					resultTabs.SetActiveTab(i)
+					app.SetFocusArea(models.FocusDataPanel)
+					app.UpdatePanelStyles()
+					return
+				}
+			}
+		}
+	}
+
+	// No matching tab found — focus tree
+	app.SetFocusArea(models.FocusTreeView)
+	app.UpdatePanelStyles()
 }
 
 // formatDMLSummary produces a concise one-line summary of a DML result.

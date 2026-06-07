@@ -148,6 +148,23 @@ func (rt *ResultTabs) CancelPendingQuery() {
 	rt.pendingSQL = ""
 }
 
+// RemovePendingQuery removes the pending tab entirely (no "cancelled" state).
+// Used for DML queries that show a toast instead of a result tab.
+func (rt *ResultTabs) RemovePendingQuery() {
+	for i, tab := range rt.tabs {
+		if tab.IsPending {
+			rt.tabs = append(rt.tabs[:i], rt.tabs[i+1:]...)
+			break
+		}
+	}
+	rt.pendingSQL = ""
+
+	// Adjust active index if needed
+	if rt.activeIdx >= len(rt.tabs) && len(rt.tabs) > 0 {
+		rt.activeIdx = len(rt.tabs) - 1
+	}
+}
+
 // HasPendingQuery returns true if there's a pending query
 func (rt *ResultTabs) HasPendingQuery() bool {
 	return rt.pendingSQL != ""

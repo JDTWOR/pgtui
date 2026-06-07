@@ -167,6 +167,9 @@ type QueryAccess interface {
 	// CancelPendingQuery cancels and removes a pending query
 	CancelPendingQuery()
 
+	// RemovePendingQuery removes the pending tab without marking it cancelled
+	RemovePendingQuery()
+
 	// SetExecuteCancelFn sets the cancel function for query execution
 	SetExecuteCancelFn(cancel func())
 

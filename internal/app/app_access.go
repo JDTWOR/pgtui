@@ -338,6 +338,11 @@ func (a *App) CancelPendingQuery() {
 	a.resultTabs.CancelPendingQuery()
 }
 
+// RemovePendingQuery removes the pending tab without marking it cancelled
+func (a *App) RemovePendingQuery() {
+	a.resultTabs.RemovePendingQuery()
+}
+
 // SetExecuteCancelFn sets the cancel function for query execution
 func (a *App) SetExecuteCancelFn(cancel func()) {
 	if cancel == nil {

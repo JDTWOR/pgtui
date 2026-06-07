@@ -773,6 +773,9 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int, visibl
 			cellValue = jsonb.Truncate(cellValue, 50)
 		}
 
+		// NULL rendering: gray italic for NULL values
+		isNull := strings.TrimSpace(cellValue) == "NULL"
+
 		// Use runewidth.Truncate for proper truncation (handles multibyte chars)
 		truncated := runewidth.Truncate(cellValue, width, "…")
 
@@ -789,6 +792,24 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int, visibl
 			cellStyle = tv.cachedStyles.selectedRow
 		} else {
 			cellStyle = tv.cachedStyles.normal
+		}
+
+		// NULL values: render in gray italic
+		if isNull && !(selected && i == tv.SelectedCol) {
+			nullStyle := lipgloss.NewStyle().
+				Foreground(tv.Theme.Comment).
+				Italic(true)
+			if selected {
+				nullStyle = nullStyle.Background(tv.Theme.Selection)
+			}
+			renderedCell := nullStyle.Width(width).MaxWidth(width).Inline(true).Render(truncated)
+			if visibleColIndex > 0 {
+				b.WriteString(separator)
+			}
+			cellZoneID := fmt.Sprintf("%s%d-%d", ZoneTableCellPrefix, visibleRowIndex, visibleColIndex)
+			b.WriteString(zone.Mark(cellZoneID, renderedCell))
+			visibleColIndex++
+			continue
 		}
 
 		// Render with lipgloss width control for proper padding

@@ -443,12 +443,29 @@ func (e *SQLEditor) renderTokens(tokens []Token) string {
 	return result.String()
 }
 
-// View renders the SQL editor with optional autocomplete popup
+// View renders the SQL editor with optional autocomplete popup.
+// The popup replaces the bottom N lines of the editor content so the
+// total rendered height stays constant — no border expansion or layout shift.
 func (e *SQLEditor) View() string {
+	// Calculate popup height first (if visible) to reserve space
+	popupHeight := e.popupLines()
+	if popupHeight > 0 {
+		popupHeight++ // Account for leading "\n" separator
+	}
+
 	// Calculate visible lines based on height
 	contentHeight := e.Height - 2 // Account for borders
 	if contentHeight < 1 {
 		contentHeight = 1
+	}
+
+	// Reserve space for the popup inside the content height
+	editorLines := contentHeight
+	if e.expanded && popupHeight > 0 {
+		editorLines -= popupHeight
+		if editorLines < 3 {
+			editorLines = 3 // Keep at least 3 editor lines visible
+		}
 	}
 
 	// Determine which lines to show
@@ -457,10 +474,10 @@ func (e *SQLEditor) View() string {
 
 	if e.expanded {
 		// Show all lines that fit, scroll if needed
-		if e.cursorRow >= contentHeight {
-			startLine = e.cursorRow - contentHeight + 1
+		if e.cursorRow >= editorLines {
+			startLine = e.cursorRow - editorLines + 1
 		}
-		endLine := startLine + contentHeight
+		endLine := startLine + editorLines
 		if endLine > len(e.lines) {
 			endLine = len(e.lines)
 		}
@@ -470,7 +487,7 @@ func (e *SQLEditor) View() string {
 		}
 
 		// Pad with empty lines if needed
-		for len(visibleLines) < contentHeight {
+		for len(visibleLines) < editorLines {
 			visibleLines = append(visibleLines, e.renderEmptyLine(startLine+len(visibleLines)))
 		}
 	} else {
@@ -478,13 +495,12 @@ func (e *SQLEditor) View() string {
 		for i := 0; i < 2 && i < len(e.lines); i++ {
 			visibleLines = append(visibleLines, e.renderLine(i, false))
 		}
-		// Pad if less than 2 lines
 		for len(visibleLines) < 2 {
 			visibleLines = append(visibleLines, e.renderEmptyLine(len(visibleLines)))
 		}
 	}
 
-	// Append autocomplete popup if visible and expanded
+	// Append autocomplete popup, replacing the bottom editor lines
 	if e.showSuggestions && e.expanded {
 		popupContent := e.renderSuggestionPopup()
 		visibleLines = append(visibleLines, popupContent)
@@ -492,8 +508,7 @@ func (e *SQLEditor) View() string {
 
 	content := strings.Join(visibleLines, "\n")
 
-	// Container style - define first
-	// Use focused border color when focused (even if collapsed)
+	// Container style
 	borderColor := e.Theme.Border
 	if e.Focused || e.expanded {
 		borderColor = e.Theme.BorderFocused
@@ -509,6 +524,15 @@ func (e *SQLEditor) View() string {
 
 	// Wrap entire editor with zone mark for click detection
 	return zone.Mark(ZoneSQLEditor, containerStyle.Render(content))
+}
+
+// popupLines returns the number of lines the suggestion popup will occupy (excluding the leading "\n" separator).
+func (e *SQLEditor) popupLines() int {
+	if !e.showSuggestions || len(e.suggestions) == 0 {
+		return 0
+	}
+	// Header + items + footer
+	return 1 + len(e.suggestions) + 1 // min 3, max 12
 }
 
 // renderSuggestionPopup renders the autocomplete dropdown.

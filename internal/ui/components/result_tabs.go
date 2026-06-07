@@ -14,7 +14,8 @@ import (
 
 // Zone ID prefixes for mouse click handling
 const (
-	ZoneResultTabPrefix = "result-tab-"
+	ZoneResultTabPrefix      = "result-tab-"
+	ZoneResultTabClosePrefix = "result-tab-close-"
 )
 
 const MaxResultTabs = 10
@@ -497,9 +498,22 @@ func (rt *ResultTabs) RenderTabBar(width int) string {
 				Padding(0, 1)
 		}
 
+		// Close button (×) — rendered after the label with its own zone
+		bgColor := rt.Theme.Info
+		if i != rt.activeIdx {
+			bgColor = rt.Theme.Selection
+		}
+		closeStyle := lipgloss.NewStyle().
+			Foreground(rt.Theme.Error).
+			Background(bgColor).
+			Padding(0, 1)
+
+		closeZoneID := fmt.Sprintf("%s%d", ZoneResultTabClosePrefix, i)
+		closeBtn := zone.Mark(closeZoneID, closeStyle.Render("×"))
+
 		// Wrap each tab with zone mark for click detection
 		zoneID := fmt.Sprintf("%s%d", ZoneResultTabPrefix, i)
-		tabViews = append(tabViews, zone.Mark(zoneID, style.Render(label)))
+		tabViews = append(tabViews, zone.Mark(zoneID, style.Render(label))+closeBtn)
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, tabViews...)

@@ -1008,6 +1008,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 
+		case "ctrl+w":
+			// Close the active result tab
+			if a.resultTabs.HasTabs() {
+				a.resultTabs.CloseActiveTab()
+				// Reset SQL editor if no tabs remain
+				if !a.resultTabs.HasTabs() {
+					a.sqlEditor.SetContent("")
+				} else if sql := a.resultTabs.GetActiveSQL(); sql != "" {
+					a.sqlEditor.SetContent(sql)
+				}
+				return a, nil
+			}
+			return a, nil
+
 		case "1", "2", "3", "4":
 			// Switch structure view sub-tabs when active tab is TableData
 			if !a.isSQLEditorFocused() {
@@ -3033,7 +3047,23 @@ func (a *App) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// Check result tabs first
+		// Check close buttons on result tabs first (before tab activation)
+		for i := 0; i < components.MaxResultTabs; i++ {
+			closeZoneID := fmt.Sprintf("%s%d", components.ZoneResultTabClosePrefix, i)
+			if zone.Get(closeZoneID).InBounds(msg) {
+				a.resultTabs.SetActiveTab(i)
+				a.resultTabs.CloseActiveTab()
+				// Reset SQL editor content if active tab was closed
+				if !a.resultTabs.HasTabs() {
+					a.sqlEditor.SetContent("")
+				} else if activeSQL := a.resultTabs.GetActiveSQL(); activeSQL != "" {
+					a.sqlEditor.SetContent(activeSQL)
+				}
+				return a, nil
+			}
+		}
+
+		// Check result tabs
 		for i := 0; i < components.MaxResultTabs; i++ {
 			zoneID := fmt.Sprintf("%s%d", components.ZoneResultTabPrefix, i)
 			if zone.Get(zoneID).InBounds(msg) {

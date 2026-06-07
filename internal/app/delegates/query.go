@@ -95,6 +95,9 @@ func (d *QueryDelegate) handleQueryResult(msg messages.QueryResultMsg, app AppAc
 		return true, nil
 	}
 
+	// Record query to history store for later review
+	app.RecordQueryHistory(msg.SQL, msg.Result)
+
 	// Complete the pending query with results
 	app.CompletePendingQuery(msg.SQL, msg.Result)
 

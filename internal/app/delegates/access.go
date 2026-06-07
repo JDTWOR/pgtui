@@ -155,6 +155,9 @@ type QueryAccess interface {
 	// SaveObjectDefinition saves an object definition (function, view, etc.)
 	SaveObjectDefinition(msg components.SaveObjectMsg) tea.Cmd
 
+	// RecordQueryHistory records a query execution in the history store
+	RecordQueryHistory(sql string, result models.QueryResult)
+
 	// StartPendingQuery creates a pending query tab
 	StartPendingQuery(sql string)
 

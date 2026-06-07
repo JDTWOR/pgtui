@@ -11,6 +11,7 @@ import (
 	"github.com/rebelice/lazypg/internal/app/messages"
 	"github.com/rebelice/lazypg/internal/db/connection"
 	"github.com/rebelice/lazypg/internal/db/query"
+	"github.com/rebelice/lazypg/internal/history"
 	"github.com/rebelice/lazypg/internal/models"
 	"github.com/rebelice/lazypg/internal/ui/components"
 )
@@ -289,6 +290,36 @@ func (a *App) ExecuteQuery(sql string) tea.Cmd {
 // SaveObjectDefinition saves an object definition
 func (a *App) SaveObjectDefinition(msg components.SaveObjectMsg) tea.Cmd {
 	return a.saveObjectDefinition(msg)
+}
+
+// RecordQueryHistory records a query execution in the history store.
+func (a *App) RecordQueryHistory(sql string, result models.QueryResult) {
+	if a.historyStore == nil {
+		return
+	}
+
+	connName := ""
+	dbName := ""
+	if a.state.ActiveConnection != nil {
+		connName = a.state.ActiveConnection.Config.Name
+		dbName = a.state.ActiveConnection.Config.Database
+	}
+
+	entry := history.HistoryEntry{
+		ConnectionName: connName,
+		DatabaseName:   dbName,
+		Query:          sql,
+		Duration:       result.Duration,
+		RowsAffected:   result.RowsAffected,
+		Success:        result.Error == nil,
+	}
+
+	if result.Error != nil {
+		entry.ErrorMessage = result.Error.Error()
+	}
+
+	// Record to history (ignore errors to not interrupt user flow)
+	_ = a.historyStore.Add(entry)
 }
 
 // StartPendingQuery creates a pending query tab

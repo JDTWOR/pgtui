@@ -42,6 +42,7 @@ type EditorConfig struct {
 type DataConfig struct {
 	VirtualScrollBuffer  int  `mapstructure:"virtual_scroll_buffer"`
 	MaxCellDisplayLength int  `mapstructure:"max_cell_display_length"`
+	PageSize             int  `mapstructure:"page_size"`
 	JSONBAutoFormat      bool `mapstructure:"jsonb_auto_format"`
 	LargeTableThreshold  int  `mapstructure:"large_table_threshold"`
 	PrefetchThreshold    int  `mapstructure:"prefetch_threshold"`
@@ -86,6 +87,7 @@ func GetDefaults() *Config {
 		Data: DataConfig{
 			VirtualScrollBuffer:  100,
 			MaxCellDisplayLength: 100,
+			PageSize:             100,
 			JSONBAutoFormat:      true,
 			LargeTableThreshold:  1000000,
 			PrefetchThreshold:    50,
@@ -141,6 +143,7 @@ func Load() (*Config, error) {
 	v.SetDefault("editor.format_on_save", false)
 	v.SetDefault("data.virtual_scroll_buffer", 100)
 	v.SetDefault("data.max_cell_display_length", 100)
+	v.SetDefault("data.page_size", 100)
 	v.SetDefault("data.jsonb_auto_format", true)
 	v.SetDefault("data.large_table_threshold", 1000000)
 	v.SetDefault("data.prefetch_threshold", 50)

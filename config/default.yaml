@@ -21,6 +21,7 @@ editor:
 data:
   virtual_scroll_buffer: 100
   max_cell_display_length: 100
+  page_size: 100
   jsonb_auto_format: true
   large_table_threshold: 1000000
   prefetch_threshold: 50

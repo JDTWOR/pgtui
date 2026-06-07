@@ -4190,8 +4190,18 @@ func (a *App) loadTableData(msg messages.LoadTableDataMsg) tea.Cmd {
 	}
 }
 
-// loadTableDataForTab loads table data for a specific tab
+// loadTableDataForTab loads table data for a specific tab.
+// Default ORDER BY on "id" column for consistent row ordering (like DataGrip).
 func (a *App) loadTableDataForTab(schema, table, objectID string) tea.Cmd {
+	pageSize := a.config.Data.PageSize
+	if pageSize <= 0 {
+		pageSize = 100
+	}
+	defaultSort := &metadata.SortOptions{
+		Column:     "id",
+		Direction:  "ASC",
+		NullsFirst: false,
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 
@@ -4200,9 +4210,13 @@ func (a *App) loadTableDataForTab(schema, table, objectID string) tea.Cmd {
 			return messages.TabTableDataLoadedMsg{ObjectID: objectID, Err: fmt.Errorf("no active connection: %w", err)}
 		}
 
-		data, err := metadata.QueryTableData(ctx, conn.Pool, schema, table, 0, 100, nil)
+		data, err := metadata.QueryTableData(ctx, conn.Pool, schema, table, 0, pageSize, defaultSort)
 		if err != nil {
-			return messages.TabTableDataLoadedMsg{ObjectID: objectID, Err: err}
+			// If "id" column doesn't exist, retry without sort
+			data, err = metadata.QueryTableData(ctx, conn.Pool, schema, table, 0, pageSize, nil)
+			if err != nil {
+				return messages.TabTableDataLoadedMsg{ObjectID: objectID, Err: err}
+			}
 		}
 
 		return messages.TabTableDataLoadedMsg{

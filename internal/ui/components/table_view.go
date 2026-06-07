@@ -724,39 +724,24 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int, visibl
 
 		value := row[i]
 
-		// Inline editing: render the edit buffer with cursor highlight.
-		// Uses []rune to safely handle multi-byte characters.
+		// Inline editing: render buffer with cursor block (█) at edit position.
+		// Uses a single styled segment with Width(width) for correct alignment,
+		// same as normal cells. The █ character is visibly distinct as cursor.
 		if tv.Editing && rowIndex == tv.EditRow && i == tv.EditCol {
 			runes := []rune(tv.EditBuffer)
 			cursorPos := tv.EditCursor
 			if cursorPos > len(runes) {
 				cursorPos = len(runes)
 			}
-			// Build a padded display of `width` runes
-			display := make([]rune, width)
-			for j := 0; j < width; j++ {
-				if j < len(runes) {
-					display[j] = runes[j]
-				} else {
-					display[j] = ' '
-				}
-			}
-			// Ensure cursor is within bounds
-			if cursorPos >= len(display) {
-				cursorPos = len(display) - 1
-			}
-			// Split into before/at/after cursor using rune slices (no byte-offset issues)
-			beforeRunes := string(display[:cursorPos])
-			atRune := string(display[cursorPos])
-			afterRunes := string(display[cursorPos+1:])
-
-			cursorStyle := lipgloss.NewStyle().
-				Background(tv.Theme.Cursor).
-				Foreground(tv.Theme.Background)
-			baseStyle := tv.cachedStyles.selectedCell
-
-			rendered := baseStyle.Render(beforeRunes) + cursorStyle.Render(atRune) + baseStyle.Render(afterRunes)
-			b.WriteString(rendered)
+			// Build display text with a cursor block character inserted
+			display := make([]rune, 0, len(runes)+1)
+			display = append(display, runes[:cursorPos]...)
+			display = append(display, '█') // cursor block
+			display = append(display, runes[cursorPos:]...)
+			// Render with same Width+MaxWidth+Inline as normal cells
+			cellStyle := tv.cachedStyles.selectedCell.
+				Width(width).MaxWidth(width).Inline(true)
+			b.WriteString(cellStyle.Render(string(display)))
 			b.WriteString(separator)
 			continue
 		}

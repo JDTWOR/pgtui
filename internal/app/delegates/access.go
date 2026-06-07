@@ -244,6 +244,12 @@ type UIAccess interface {
 
 	// PopulateMetadataCache rebuilds the autocomplete metadata from the tree
 	PopulateMetadataCache()
+
+	// ShowSuccessToast shows a brief success notification in the data panel
+	ShowSuccessToast(message string)
+
+	// DismissSuccessToast hides the success toast
+	DismissSuccessToast()
 }
 
 // SearchInput represents the search input interface

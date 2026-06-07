@@ -131,6 +131,10 @@ type App struct {
 	executeCancelFn context.CancelFunc
 	executeSpinner  spinner.Model
 
+	// Success toast notification
+	showSuccessToast bool
+	successToastMsg  string
+
 	// Cached styles for performance (avoid recreating on every render)
 	cachedStyles *appStyles
 
@@ -809,6 +813,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.KeyMsg:
+		// Dismiss success toast on any key
+		if a.showSuccessToast {
+			a.DismissSuccessToast()
+			// Continue processing the key (don't return early)
+		}
+
 		// Handle error overlay dismissal first if visible
 		if a.showError {
 			key := msg.String()
@@ -2613,6 +2623,31 @@ func (a *App) renderDataPanel(width, height int) string {
 		a.codeEditor.Width = width
 		a.codeEditor.Height = height
 		return a.codeEditor.View()
+	}
+
+	// Success toast notification (shown after DML queries instead of result tabs)
+	if a.showSuccessToast && a.successToastMsg != "" {
+		// Success icon + message
+		iconStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(a.theme.Success)
+		msgStyle := lipgloss.NewStyle().
+			Foreground(a.theme.Foreground)
+		hintStyle := lipgloss.NewStyle().
+			Foreground(a.theme.Comment).
+			Italic(true)
+
+		lines := []string{
+			"",
+			iconStyle.Render("✓ Success"),
+			"",
+			msgStyle.Render(a.successToastMsg),
+			"",
+			"",
+			hintStyle.Render("Press any key to dismiss"),
+		}
+		content := lipgloss.JoinVertical(lipgloss.Center, lines...)
+		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 	}
 
 	// No data - show placeholder

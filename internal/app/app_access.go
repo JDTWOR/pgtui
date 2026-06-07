@@ -458,6 +458,18 @@ func (a *App) GetSpinnerTickCmd() tea.Cmd {
 	return a.executeSpinner.Tick
 }
 
+// ShowSuccessToast shows a brief success notification in the data panel.
+func (a *App) ShowSuccessToast(message string) {
+	a.showSuccessToast = true
+	a.successToastMsg = message
+}
+
+// DismissSuccessToast hides the success toast.
+func (a *App) DismissSuccessToast() {
+	a.showSuccessToast = false
+	a.successToastMsg = ""
+}
+
 // PopulateMetadataCache rebuilds the autocomplete metadata cache from the tree root.
 // Called after the tree is loaded or refreshed.
 func (a *App) PopulateMetadataCache() {

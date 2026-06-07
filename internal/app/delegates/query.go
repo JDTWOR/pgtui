@@ -98,20 +98,32 @@ func (d *QueryDelegate) handleQueryResult(msg messages.QueryResultMsg, app AppAc
 	// Record query to history store for later review
 	app.RecordQueryHistory(msg.SQL, msg.Result)
 
-	// Complete the pending query with results
-	app.CompletePendingQuery(msg.SQL, msg.Result)
-
-	// Auto-refresh any existing table data tabs affected by this DML statement.
-	cmds := d.refreshTabsForDML(msg.SQL, app)
-
-	// For DML queries (no columns returned), return focus to tree view
-	// so the user can navigate without manually closing an empty result tab.
+	// DML queries (no columns returned): show a compact toast, refresh
+	// affected table tabs, and skip creating a full result tab.
 	if len(msg.Result.Columns) == 0 {
+		// Cancel the pending tab (don't show a useless "no data" tab)
+		app.CancelPendingQuery()
+
+		// Show a brief success toast with operation details
+		app.ShowSuccessToast(d.formatDMLSummary(msg.SQL, msg.Result))
+
+		// Refresh any affected table data tabs in background
+		cmds := d.refreshTabsForDML(msg.SQL, app)
+
+		// Focus tree so user can navigate to the refreshed table
 		app.SetFocusArea(models.FocusTreeView)
 		app.UpdatePanelStyles()
+
+		if cmds != nil {
+			return true, cmds
+		}
+		return true, nil
 	}
 
-	if cmds != nil {
+	// SELECT queries: show a proper result tab
+	app.CompletePendingQuery(msg.SQL, msg.Result)
+
+	if cmds := d.refreshTabsForDML(msg.SQL, app); cmds != nil {
 		return true, cmds
 	}
 
@@ -188,6 +200,40 @@ func (d *QueryDelegate) refreshTabsForDML(sql string, app AppAccess) tea.Cmd {
 		return nil
 	}
 	return tea.Batch(cmds...)
+}
+
+// formatDMLSummary produces a concise one-line summary of a DML result.
+// Example: "INSERT public.users · 3 rows (0.015s)"
+func (d *QueryDelegate) formatDMLSummary(sql string, result models.QueryResult) string {
+	op := "QUERY"
+	if dmlInsertRe.MatchString(sql) {
+		op = "INSERT"
+	} else if dmlUpdateRe.MatchString(sql) {
+		op = "UPDATE"
+	} else if dmlDeleteRe.MatchString(sql) {
+		op = "DELETE"
+	} else if dmlTruncateRe.MatchString(sql) {
+		op = "TRUNCATE"
+	} else if dmlRefreshMvRe.MatchString(sql) {
+		op = "REFRESH MV"
+	}
+
+	names := d.extractAffectedTableNames(sql)
+	tableName := ""
+	if len(names) > 0 {
+		tableName = names[0]
+	}
+
+	rowStr := fmt.Sprintf("%d rows", result.RowsAffected)
+	if result.RowsAffected == 1 {
+		rowStr = "1 row"
+	}
+	durStr := fmt.Sprintf("%.3fs", result.Duration.Seconds())
+
+	if tableName != "" {
+		return fmt.Sprintf("%s %s · %s (%s)", op, tableName, rowStr, durStr)
+	}
+	return fmt.Sprintf("%s · %s (%s)", op, rowStr, durStr)
 }
 
 // handleSaveObject handles object definition save request.

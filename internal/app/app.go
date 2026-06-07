@@ -1394,7 +1394,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if msg.String() == "enter" {
 					schema, table := a.getActiveTableNames(activeTable)
 					if schema != "" && table != "" {
-						row := activeTable.TopRow + activeTable.SelectedRow
+						row := activeTable.SelectedRow // SelectedRow is absolute index
 						col := activeTable.SelectedCol
 						if row >= 0 && row < len(activeTable.Rows) && col >= 0 && col < len(activeTable.Columns) {
 							// Set table identity for UPDATE generation

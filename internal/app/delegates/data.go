@@ -105,8 +105,12 @@ func (d *DataDelegate) handleTabTableDataLoaded(msg messages.TabTableDataLoadedM
 	for _, tab := range resultTabs.GetAllTabs() {
 		if tab.ObjectID == msg.ObjectID && tab.Type == components.TabTypeTableData {
 			if tab.Structure != nil {
+				tv := tab.Structure.GetTableView()
+				// Set table identity for inline editing
+				tv.TableSchema = msg.Schema
+				tv.TableName = msg.Table
 				// Set table data in the structure view
-				tab.Structure.GetTableView().SetData(msg.Columns, msg.Rows, msg.TotalRows)
+				tv.SetData(msg.Columns, msg.Rows, msg.TotalRows)
 				// Note: Structure metadata (columns, constraints, indexes) is loaded
 				// lazily when user switches to those tabs to avoid blocking the UI
 			}

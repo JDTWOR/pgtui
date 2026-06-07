@@ -428,6 +428,8 @@ func (a *App) CreateTableDataTab(objectID, label, schema, table string) tea.Cmd 
 	// Create new StructureView for this table
 	tableView := components.NewTableView(a.theme)
 	tableView.Spinner = &a.executeSpinner
+	tableView.TableSchema = schema
+	tableView.TableName = table
 	structureView := components.NewStructureView(a.theme, tableView)
 
 	// Set loading state

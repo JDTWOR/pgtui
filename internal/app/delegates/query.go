@@ -99,9 +99,15 @@ func (d *QueryDelegate) handleQueryResult(msg messages.QueryResultMsg, app AppAc
 	app.CompletePendingQuery(msg.SQL, msg.Result)
 
 	// Auto-refresh any existing table data tabs affected by this DML statement.
-	// After an INSERT/UPDATE/DELETE/TRUNCATE, the affected table tabs show stale data;
-	// this triggers a fresh SELECT for each matching tab.
 	cmds := d.refreshTabsForDML(msg.SQL, app)
+
+	// For DML queries (no columns returned), return focus to tree view
+	// so the user can navigate without manually closing an empty result tab.
+	if len(msg.Result.Columns) == 0 {
+		app.SetFocusArea(models.FocusTreeView)
+		app.UpdatePanelStyles()
+	}
+
 	if cmds != nil {
 		return true, cmds
 	}

@@ -2465,7 +2465,12 @@ func (a *App) renderDataPanel(width, height int) string {
 			// Render based on tab type
 			switch activeTab.Type {
 			case components.TabTypeQueryResult:
-				// Show query result table view
+				// DML queries (INSERT/UPDATE/DELETE/TRUNCATE) don't return columns.
+				// Show a compact summary instead of an empty "No data" table.
+				if len(activeTab.Result.Columns) == 0 && activeTab.Result.Error == nil && !activeTab.IsPending && !activeTab.IsCancelled {
+					return a.renderDMLSummary(activeTab, width, height)
+				}
+				// Show query result table view (SELECT queries)
 				activeTable := a.resultTabs.GetActiveTableView()
 				if activeTable != nil {
 					activeTable.Width = width
@@ -2593,6 +2598,52 @@ func (a *App) renderDataPanel(width, height int) string {
 		Align(lipgloss.Center, lipgloss.Center)
 
 	return placeholderStyle.Render("No data to display\n\nPress Ctrl+E to open SQL editor")
+}
+
+// renderDMLSummary renders a compact result summary for DML queries.
+// Called when a TabTypeQueryResult has no columns (INSERT/UPDATE/DELETE/TRUNCATE/etc.).
+func (a *App) renderDMLSummary(tab *components.ResultTab, width, height int) string {
+	title := tab.Title
+	if title == "" {
+		title = "Query executed"
+	}
+	rowsAffected := tab.Result.RowsAffected
+	duration := tab.Result.Duration
+
+	// Success icon + operation title
+	titleLine := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(a.theme.Success).
+		Render("✓ " + title)
+
+	// Stats: rows affected + duration
+	rowStr := fmt.Sprintf("%d rows affected", rowsAffected)
+	if rowsAffected == 1 {
+		rowStr = "1 row affected"
+	}
+	durationStr := fmt.Sprintf("%.3fs", duration.Seconds())
+	statsLine := lipgloss.NewStyle().
+		Foreground(a.theme.Foreground).
+		Render(rowStr + "  ·  " + durationStr)
+
+	// Hint text
+	hintLine := lipgloss.NewStyle().
+		Foreground(a.theme.Comment).
+		Italic(true).
+		Render("Related table tabs refreshed automatically.")
+
+	// Build content block
+	content := lipgloss.JoinVertical(lipgloss.Center,
+		"",
+		titleLine,
+		"",
+		statsLine,
+		"",
+		"",
+		hintLine,
+	)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 }
 
 // updatePanelDimensions calculates panel sizes based on window size

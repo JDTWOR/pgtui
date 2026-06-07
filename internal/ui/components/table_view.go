@@ -974,6 +974,13 @@ func (tv *TableView) renderStatus() string {
 	}
 
 	showing := fmt.Sprintf(" 󰈙 %s%s%s%d-%d of %d rows", matchInfo, colInfo, pinnedInfo, tv.TopRow+1, endRow, tv.TotalRows)
+
+	// Show load-more hint when there are more rows available
+	if len(tv.Rows) < tv.TotalRows && !tv.IsPaginating {
+		remaining := tv.TotalRows - len(tv.Rows)
+		showing += fmt.Sprintf(" · %d more — Ctrl+L", remaining)
+	}
+
 	return tv.cachedStyles.status.Render(showing)
 }
 

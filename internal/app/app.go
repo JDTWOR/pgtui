@@ -1378,6 +1378,45 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 
+				// Load more rows (Ctrl+L)
+				if msg.String() == "ctrl+l" {
+					if activeTable.TotalRows > len(activeTable.Rows) && !activeTable.IsPaginating {
+						schema, table := a.getActiveSchemaTable()
+						if schema != "" && table != "" {
+							activeTable.IsPaginating = true
+							offset := len(activeTable.Rows)
+							cmds := []tea.Cmd{}
+							if a.resultTabs.HasTabs() {
+								cmds = append(cmds, func() tea.Msg {
+									return messages.PrefetchDataMsg{
+										Schema:     schema,
+										Table:      table,
+										Offset:     offset,
+										Limit:      100,
+										SortColumn: activeTable.GetSortColumn(),
+										SortDir:    activeTable.GetSortDirection(),
+										NullsFirst: activeTable.GetNullsFirst(),
+									}
+								})
+							} else {
+								cmds = append(cmds, func() tea.Msg {
+									return messages.LoadTableDataMsg{
+										Schema:     schema,
+										Table:      table,
+										Offset:     offset,
+										Limit:      100,
+										SortColumn: activeTable.GetSortColumn(),
+										SortDir:    activeTable.GetSortDirection(),
+										NullsFirst: activeTable.GetNullsFirst(),
+									}
+								})
+							}
+							return a, tea.Batch(cmds...)
+						}
+					}
+					return a, nil
+				}
+
 				// Handle Vim motion (number prefixes, g, G, etc.)
 				// This must come before individual key handling
 				if activeTable.HandleVimMotion(msg.String()) {

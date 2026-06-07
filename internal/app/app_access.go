@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -455,6 +456,53 @@ func (a *App) CreateCodeEditorTab(objectID, title, content, objectType, objectNa
 // GetSpinnerTickCmd returns a command to tick the spinner
 func (a *App) GetSpinnerTickCmd() tea.Cmd {
 	return a.executeSpinner.Tick
+}
+
+// PopulateMetadataCache rebuilds the autocomplete metadata cache from the tree root.
+// Called after the tree is loaded or refreshed.
+func (a *App) PopulateMetadataCache() {
+	if a.metadataCache == nil || a.treeView == nil || a.treeView.Root == nil {
+		return
+	}
+
+	mc := components.NewMetadataCache()
+	a.collectTablesFromTree(mc, a.treeView.Root)
+	a.metadataCache = mc
+	if a.completionEngine != nil {
+		a.completionEngine.SetMetadata(mc)
+	}
+}
+
+// collectTablesFromTree recursively traverses tree nodes to find tables and their columns.
+func (a *App) collectTablesFromTree(mc *components.MetadataCache, node *models.TreeNode) {
+	if node == nil {
+		return
+	}
+
+	// Check if this is a table/view node
+	if node.Type == models.TreeNodeTypeTable || node.Type == models.TreeNodeTypeView || node.Type == models.TreeNodeTypeMaterializedView {
+		// Find the schema name from parent chain
+		schema := ""
+		current := node.Parent
+		for current != nil {
+			if current.Type == models.TreeNodeTypeSchema {
+				// Extract schema name (label might have count info)
+				schema = strings.Split(current.Label, " ")[0]
+				break
+			}
+			current = current.Parent
+		}
+		if schema != "" {
+			mc.AddTable(schema, node.Label)
+			// Try to load columns from metadata if available
+			// For now, we mark the table exists; columns are loaded lazily
+		}
+	}
+
+	// Recurse into children
+	for _, child := range node.Children {
+		a.collectTablesFromTree(mc, child)
+	}
 }
 
 // SetShowError shows/hides the error overlay

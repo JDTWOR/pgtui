@@ -61,6 +61,13 @@ type SQLEditor struct {
 	// History
 	history    []string
 	historyIdx int
+
+	// Autocomplete
+	completionEngine  *CompletionEngine
+	suggestions       []CompletionItem
+	selectedSuggestion int
+	showSuggestions    bool
+	lastCharPos       int // Absolute char position for triggering re-suggest
 }
 
 // NewSQLEditor creates a new SQL editor
@@ -436,7 +443,7 @@ func (e *SQLEditor) renderTokens(tokens []Token) string {
 	return result.String()
 }
 
-// View renders the SQL editor
+// View renders the SQL editor with optional autocomplete popup
 func (e *SQLEditor) View() string {
 	// Calculate visible lines based on height
 	contentHeight := e.Height - 2 // Account for borders
@@ -477,6 +484,12 @@ func (e *SQLEditor) View() string {
 		}
 	}
 
+	// Append autocomplete popup if visible and expanded
+	if e.showSuggestions && e.expanded {
+		popupContent := e.renderSuggestionPopup()
+		visibleLines = append(visibleLines, popupContent)
+	}
+
 	content := strings.Join(visibleLines, "\n")
 
 	// Container style - define first
@@ -496,6 +509,54 @@ func (e *SQLEditor) View() string {
 
 	// Wrap entire editor with zone mark for click detection
 	return zone.Mark(ZoneSQLEditor, containerStyle.Render(content))
+}
+
+// renderSuggestionPopup renders the autocomplete dropdown.
+func (e *SQLEditor) renderSuggestionPopup() string {
+	if len(e.suggestions) == 0 {
+		return ""
+	}
+
+	var lines []string
+
+	// Popup header
+	headerStyle := lipgloss.NewStyle().
+		Foreground(e.Theme.Background).
+		Background(e.Theme.Info).
+		Bold(true).
+		Padding(0, 1)
+	lines = append(lines, headerStyle.Render(" Autocomplete "))
+
+	// Popup items
+	for i, item := range e.suggestions {
+		var style lipgloss.Style
+		if i == e.selectedSuggestion {
+			// Selected item
+			style = lipgloss.NewStyle().
+				Foreground(e.Theme.Background).
+				Background(e.Theme.Cursor).
+				Padding(0, 1)
+		} else {
+			style = lipgloss.NewStyle().
+				Foreground(e.Theme.Foreground).
+				Background(e.Theme.Selection).
+				Padding(0, 1)
+		}
+
+		label := item.Label
+		if item.Detail != "" {
+			label = fmt.Sprintf("%-20s  %s", item.Label, item.Detail)
+		}
+		lines = append(lines, style.Render(" "+label+" "))
+	}
+
+	// Footer hint
+	footerStyle := lipgloss.NewStyle().
+		Foreground(e.Theme.Comment).
+		Padding(0, 1)
+	lines = append(lines, footerStyle.Render(" Tab/Enter accept  ·  Esc dismiss "))
+
+	return "\n" + strings.Join(lines, "\n")
 }
 
 // renderLine renders a single line with line number and syntax highlighting
@@ -593,47 +654,88 @@ func (e *SQLEditor) insertCursor(line string, tokens []Token) string {
 
 // Update handles keyboard input
 func (e *SQLEditor) Update(msg tea.KeyMsg) (*SQLEditor, tea.Cmd) {
+	// Handle completion popup navigation first
+	if e.showSuggestions {
+		switch msg.String() {
+		case "up":
+			if e.selectedSuggestion > 0 {
+				e.selectedSuggestion--
+			}
+			return e, nil
+		case "down":
+			if e.selectedSuggestion < len(e.suggestions)-1 {
+				e.selectedSuggestion++
+			}
+			return e, nil
+		case "tab", "enter":
+			e.acceptSuggestion()
+			return e, nil
+		case "esc":
+			e.showSuggestions = false
+			e.suggestions = nil
+			return e, nil
+		case "left", "right":
+			// Dismiss suggestions on horizontal movement
+			e.showSuggestions = false
+			e.suggestions = nil
+		}
+	}
+
 	switch msg.String() {
 	// Cursor movement
 	case "left":
 		e.MoveCursorLeft()
+		e.showSuggestions = false
 	case "right":
 		e.MoveCursorRight()
+		e.showSuggestions = false
 	case "up":
 		e.MoveCursorUp()
+		e.showSuggestions = false
 	case "down":
 		e.MoveCursorDown()
+		e.showSuggestions = false
 	case "home":
 		e.MoveCursorToLineStart()
+		e.showSuggestions = false
 	case "end":
 		e.MoveCursorToLineEnd()
+		e.showSuggestions = false
 	case "ctrl+home":
 		e.MoveCursorToDocStart()
+		e.showSuggestions = false
 	case "ctrl+end":
 		e.MoveCursorToDocEnd()
+		e.showSuggestions = false
 
 	// Text editing
 	case "backspace":
 		e.DeleteCharBefore()
+		e.triggerSuggestions()
 	case "delete":
 		e.DeleteCharAfter()
+		e.triggerSuggestions()
 	case "enter":
 		e.InsertNewline()
+		e.showSuggestions = false
 	case "tab":
-		// Insert 4 spaces for tab
+		// Insert 4 spaces for tab (if no popup active)
 		for i := 0; i < 4; i++ {
 			e.InsertChar(' ')
 		}
 	case "ctrl+u":
 		e.Clear()
+		e.showSuggestions = false
 
 	// History navigation
 	case "ctrl+up":
 		e.HistoryPrev()
+		e.showSuggestions = false
 	case "ctrl+down":
 		e.HistoryNext()
+		e.showSuggestions = false
 
-	// Execute (Ctrl+S - note: ctrl+enter equals enter, alt+enter doesn't work on macOS)
+	// Execute
 	case "ctrl+s":
 		sql := e.GetCurrentStatement()
 		if sql != "" {
@@ -649,21 +751,127 @@ func (e *SQLEditor) Update(msg tea.KeyMsg) (*SQLEditor, tea.Cmd) {
 			return OpenExternalEditorMsg{Content: e.GetContent()}
 		}
 
+	// Dismiss on escape when no popup
+	case "esc":
+		e.showSuggestions = false
+
 	default:
 		// Handle printable characters
 		if len(msg.String()) == 1 {
 			ch := rune(msg.String()[0])
 			if ch >= 32 && ch <= 126 {
 				e.InsertChar(ch)
+				e.triggerSuggestions()
 			}
 		} else if msg.Type == tea.KeyRunes {
 			for _, r := range msg.Runes {
 				e.InsertChar(r)
 			}
+			e.triggerSuggestions()
 		}
 	}
 
 	return e, nil
+}
+
+// SetCompletionEngine sets the autocomplete engine for the editor.
+func (e *SQLEditor) SetCompletionEngine(engine *CompletionEngine) {
+	e.completionEngine = engine
+}
+
+// triggerSuggestions computes autocomplete suggestions based on current cursor position.
+func (e *SQLEditor) triggerSuggestions() {
+	if e.completionEngine == nil || !e.expanded {
+		e.showSuggestions = false
+		return
+	}
+
+	sql := e.GetContent()
+	cursorPos := e.getCursorAbsolutePos()
+
+	suggestions := e.completionEngine.Suggest(sql, cursorPos)
+	if len(suggestions) == 0 {
+		e.showSuggestions = false
+		return
+	}
+
+	e.suggestions = suggestions
+	e.selectedSuggestion = 0
+	e.showSuggestions = true
+}
+
+// getCursorAbsolutePos returns the absolute character position of the cursor.
+func (e *SQLEditor) getCursorAbsolutePos() int {
+	pos := 0
+	for row := 0; row < e.cursorRow; row++ {
+		pos += len(e.lines[row]) + 1 // +1 for newline
+	}
+	pos += e.cursorCol
+	return pos
+}
+
+// acceptSuggestion inserts the currently selected suggestion and closes the popup.
+func (e *SQLEditor) acceptSuggestion() {
+	if !e.showSuggestions || len(e.suggestions) == 0 {
+		return
+	}
+
+	item := e.suggestions[e.selectedSuggestion]
+	insert := item.InsertText
+
+	// Find the start of the current word to replace
+	sql := e.GetContent()
+	cursorPos := e.getCursorAbsolutePos()
+	before := sql[:cursorPos]
+
+	wordStart := cursorPos
+	for wordStart > 0 {
+		ch := before[wordStart-1]
+		if ch == '.' || ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') {
+			wordStart--
+		} else {
+			break
+		}
+	}
+
+	// Replace word from wordStart to cursorPos with insert text
+	after := sql[cursorPos:]
+
+	// Reconstruct content
+	newSQL := sql[:wordStart] + insert + after
+	e.SetContent(newSQL)
+
+	// Position cursor after inserted text
+	// Recalculate position since SetContent resets it
+	e.cursorRow = 0
+	e.cursorCol = 0
+	// Find the position after the inserted text
+	searchPos := wordStart + len(insert)
+	e.setCursorToAbsolutePos(searchPos)
+
+	e.showSuggestions = false
+	e.suggestions = nil
+}
+
+// setCursorToAbsolutePos sets cursor to the given absolute character position.
+func (e *SQLEditor) setCursorToAbsolutePos(pos int) {
+	if pos <= 0 {
+		e.cursorRow = 0
+		e.cursorCol = 0
+		return
+	}
+	remaining := pos
+	for row := 0; row < len(e.lines); row++ {
+		if remaining <= len(e.lines[row]) {
+			e.cursorRow = row
+			e.cursorCol = remaining
+			return
+		}
+		remaining -= len(e.lines[row]) + 1 // +1 for newline
+	}
+	// End of document
+	e.cursorRow = len(e.lines) - 1
+	e.cursorCol = len(e.lines[e.cursorRow])
 }
 
 // AddToHistory adds content to history

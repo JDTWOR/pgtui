@@ -60,6 +60,10 @@ func (d *TreeDelegate) Update(msg tea.Msg, app AppAccess) (bool, tea.Cmd) {
 				}
 			}
 		}
+
+		// Populate autocomplete metadata from the loaded tree
+		app.PopulateMetadataCache()
+
 		return true, nil
 
 	case messages.LoadNodeChildrenMsg:

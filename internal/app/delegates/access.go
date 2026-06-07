@@ -241,6 +241,9 @@ type UIAccess interface {
 
 	// SearchTable searches the database table
 	SearchTable(query string) tea.Cmd
+
+	// PopulateMetadataCache rebuilds the autocomplete metadata from the tree
+	PopulateMetadataCache()
 }
 
 // SearchInput represents the search input interface

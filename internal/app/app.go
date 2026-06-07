@@ -80,8 +80,12 @@ type App struct {
 	commandRegistry    *commands.Registry
 
 	// SQL Editor
-	sqlEditor  *components.SQLEditor
-	resultTabs *components.ResultTabs
+	sqlEditor         *components.SQLEditor
+	resultTabs        *components.ResultTabs
+
+	// Autocomplete
+	completionEngine  *components.CompletionEngine
+	metadataCache     *components.MetadataCache
 
 	// History
 	historyStore *history.Store
@@ -259,10 +263,19 @@ func New(cfg *config.Config) *App {
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(th.Info)
 
+	// Create autocomplete metadata cache and engine
+	metadataCache := components.NewMetadataCache()
+	completionEngine := components.NewCompletionEngine(metadataCache)
+	sqlEditor := components.NewSQLEditor(th)
+	sqlEditor.SetCompletionEngine(completionEngine)
+
 	app := &App{
 		state:             state,
 		config:            cfg,
 		theme:             th,
+		completionEngine:  completionEngine,
+		metadataCache:     metadataCache,
+		sqlEditor:         sqlEditor,
 		connectionManager: connection.NewManager(),
 		discoverer:        discovery.NewDiscoverer(),
 		connectionDialog:  components.NewConnectionDialog(th),
@@ -270,7 +283,6 @@ func New(cfg *config.Config) *App {
 		treeView:          components.NewTreeView(emptyRoot, th),
 		commandRegistry:   registry,
 		commandPalette:    components.NewCommandPalette(th),
-		sqlEditor:         components.NewSQLEditor(th),
 		resultTabs:        components.NewResultTabs(th),
 		historyStore:      historyStore,
 		tableView:         tableView,

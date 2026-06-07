@@ -1424,6 +1424,62 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 
+				// Insert new row (Ctrl+Shift+N)
+				if msg.String() == "ctrl+shift+n" {
+					schema, table := a.getActiveTableNames(activeTable)
+					if schema != "" && table != "" && activeTable != nil {
+						// Create empty row
+						emptyRow := make([]string, len(activeTable.Columns))
+						for j := range emptyRow {
+							emptyRow[j] = "NULL"
+						}
+						activeTable.Rows = append(activeTable.Rows, emptyRow)
+						activeTable.TotalRows++
+						// Move selection to the new row
+						activeTable.SelectedRow = len(activeTable.Rows) - 1
+						activeTable.SelectedCol = 0
+						activeTable.TopRow = activeTable.SelectedRow - activeTable.VisibleRows + 1
+						if activeTable.TopRow < 0 {
+							activeTable.TopRow = 0
+						}
+						// Enter edit mode on first cell, mark as new row
+						activeTable.TableSchema = schema
+						activeTable.TableName = table
+						activeTable.IsNewRow = true
+						activeTable.StartEdit(activeTable.SelectedRow, 0)
+					}
+					return a, nil
+				}
+
+				// Delete selected row (Ctrl+Shift+Delete)
+				if msg.String() == "ctrl+shift+delete" {
+					schema, table := a.getActiveTableNames(activeTable)
+					if schema != "" && table != "" && activeTable != nil {
+						row := activeTable.SelectedRow
+						if row >= 0 && row < len(activeTable.Rows) {
+							sql := generateDeleteSQL(schema, table, activeTable.Columns, activeTable.Rows[row])
+							// Close the tab and execute DELETE
+							return a, func() tea.Msg {
+								conn, err := a.connectionManager.GetActive()
+								if err != nil {
+									return messages.QueryResultMsg{
+										SQL: sql,
+										Result: models.QueryResult{
+											Error: fmt.Errorf("no active connection: %w", err),
+										},
+									}
+								}
+								result := query.Execute(context.Background(), conn.Pool.GetPool(), sql)
+								return messages.QueryResultMsg{
+									SQL:    sql,
+									Result: result,
+								}
+							}
+						}
+					}
+					return a, nil
+				}
+
 				// Toggle relative line numbers
 				if msg.String() == "ctrl+n" {
 					activeTable.ToggleRelativeNumbers()
@@ -1522,7 +1578,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "s":
 					// Sort by current column (only for main table browsing, not result tabs)
 					if !a.resultTabs.HasTabs() {
-						activeTable.ToggleSort()
+						activeTable.ToggleSort(false) // false = primary sort
 						// Reload data with new sort
 						if a.currentTable != "" {
 							parts := strings.Split(a.currentTable, ".")
@@ -2792,7 +2848,7 @@ func (a *App) getActiveTableNames(tv *components.TableView) (string, string) {
 	return "", ""
 }
 
-// executeCellUpdate generates and executes an UPDATE SQL for an edited cell.
+// executeCellUpdate generates and executes an UPDATE (or INSERT for new rows) for an edited cell.
 func (a *App) executeCellUpdate(tv *components.TableView, newValue string, rowIndex, colIndex int) tea.Cmd {
 	if tv.TableSchema == "" || tv.TableName == "" {
 		a.ShowError("Edit Error", "Cannot update: table identity unknown")
@@ -2803,39 +2859,50 @@ func (a *App) executeCellUpdate(tv *components.TableView, newValue string, rowIn
 		return nil
 	}
 
-	colName := tv.Columns[colIndex]
-	if colName == "" {
-		return nil
-	}
+	var sql string
 
-	// Build UPDATE SQL with all row values as WHERE condition
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("UPDATE %s.%s SET %s = ",
-		quoteIdentifier(tv.TableSchema),
-		quoteIdentifier(tv.TableName),
-		quoteIdentifier(colName)))
-	sb.WriteString(quoteValue(newValue))
-	sb.WriteString(" WHERE ")
-
-	for i, col := range tv.Columns {
-		if i > 0 {
-			sb.WriteString(" AND ")
+	if tv.IsNewRow {
+		// Generate INSERT for new rows
+		tv.IsNewRow = false
+		// Update the edited cell value in the row
+		if rowIndex >= 0 && rowIndex < len(tv.Rows) && colIndex >= 0 && colIndex < len(tv.Rows[rowIndex]) {
+			tv.Rows[rowIndex][colIndex] = newValue
 		}
-		sb.WriteString(quoteIdentifier(col))
-		if rowIndex >= 0 && rowIndex < len(tv.Rows) && i < len(tv.Rows[rowIndex]) {
-			val := tv.Rows[rowIndex][i]
-			if val == "NULL" || val == "" {
-				sb.WriteString(" IS NULL")
-			} else {
-				sb.WriteString(" = ")
-				sb.WriteString(quoteValue(val))
+		sql = generateInsertSQL(tv.TableSchema, tv.TableName, tv.Columns, tv.Rows[rowIndex])
+	} else {
+		colName := tv.Columns[colIndex]
+		if colName == "" {
+			return nil
+		}
+
+		// Build UPDATE SQL with all row values as WHERE condition
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("UPDATE %s.%s SET %s = ",
+			quoteIdentifier(tv.TableSchema),
+			quoteIdentifier(tv.TableName),
+			quoteIdentifier(colName)))
+		sb.WriteString(quoteValue(newValue))
+		sb.WriteString(" WHERE ")
+
+		for i, col := range tv.Columns {
+			if i > 0 {
+				sb.WriteString(" AND ")
 			}
-		} else {
-			sb.WriteString(" IS NULL")
+			sb.WriteString(quoteIdentifier(col))
+			if rowIndex >= 0 && rowIndex < len(tv.Rows) && i < len(tv.Rows[rowIndex]) {
+				val := tv.Rows[rowIndex][i]
+				if val == "NULL" || val == "" {
+					sb.WriteString(" IS NULL")
+				} else {
+					sb.WriteString(" = ")
+					sb.WriteString(quoteValue(val))
+				}
+			} else {
+				sb.WriteString(" IS NULL")
+			}
 		}
+		sql = sb.String()
 	}
-
-	sql := sb.String()
 
 	// Execute asynchronously
 	conn, err := a.connectionManager.GetActive()
@@ -2851,6 +2918,29 @@ func (a *App) executeCellUpdate(tv *components.TableView, newValue string, rowIn
 			Result: result,
 		}
 	}
+}
+
+// generateDeleteSQL builds a DELETE statement for a single row using all column values as WHERE.
+func generateDeleteSQL(schema, table string, columns []string, row []string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("DELETE FROM %s.%s WHERE ",
+		quoteIdentifier(schema), quoteIdentifier(table)))
+	for i, col := range columns {
+		if i > 0 {
+			sb.WriteString(" AND ")
+		}
+		sb.WriteString(quoteIdentifier(col))
+		if i < len(row) && (row[i] == "NULL" || row[i] == "") {
+			sb.WriteString(" IS NULL")
+		} else if i < len(row) {
+			sb.WriteString(" = ")
+			sb.WriteString("'" + strings.ReplaceAll(row[i], "'", "''") + "'")
+		} else {
+			sb.WriteString(" IS NULL")
+		}
+	}
+	sb.WriteString(";")
+	return sb.String()
 }
 
 // generateInsertSQL builds an INSERT statement for a single row.

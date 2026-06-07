@@ -23,8 +23,9 @@ type SortOptions struct {
 	NullsFirst bool
 }
 
-// QueryTableData fetches paginated table data with optional sorting
-func QueryTableData(ctx context.Context, pool *connection.Pool, schema, table string, offset, limit int, sort *SortOptions) (*TableData, error) {
+// QueryTableData fetches paginated table data with optional sorting.
+// sortOps can contain multiple SortOptions for multi-column ORDER BY.
+func QueryTableData(ctx context.Context, pool *connection.Pool, schema, table string, offset, limit int, sort ...*SortOptions) (*TableData, error) {
 	// Get exact row count - uses Index-Only Scan for tables with PK/index
 	countQuery := fmt.Sprintf("SELECT COUNT(*) as count FROM %s.%s", schema, table)
 	countRow, err := pool.QueryRow(ctx, countQuery)
@@ -37,15 +38,24 @@ func QueryTableData(ctx context.Context, pool *connection.Pool, schema, table st
 		totalRows = count
 	}
 
-	// Build query with optional ORDER BY
+	// Build query with optional ORDER BY (multi-column support)
 	query := fmt.Sprintf("SELECT * FROM %s.%s", schema, table)
 
-	if sort != nil && sort.Column != "" {
-		nullsClause := "NULLS LAST"
-		if sort.NullsFirst {
-			nullsClause = "NULLS FIRST"
+	if len(sort) > 0 && sort[0] != nil && sort[0].Column != "" {
+		query += " ORDER BY"
+		for i, s := range sort {
+			if s == nil || s.Column == "" {
+				continue
+			}
+			if i > 0 {
+				query += ","
+			}
+			nullsClause := "NULLS LAST"
+			if s.NullsFirst {
+				nullsClause = "NULLS FIRST"
+			}
+			query += fmt.Sprintf(" \"%s\" %s %s", s.Column, s.Direction, nullsClause)
 		}
-		query += fmt.Sprintf(" ORDER BY \"%s\" %s %s", sort.Column, sort.Direction, nullsClause)
 	}
 
 	query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)

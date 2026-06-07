@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
 	"github.com/mattn/go-runewidth"
+	"github.com/rebelice/lazypg/internal/db/metadata"
 	"github.com/rebelice/lazypg/internal/jsonb"
 	"github.com/rebelice/lazypg/internal/ui/theme"
 )
@@ -41,10 +42,12 @@ type TableView struct {
 	// Column widths (calculated)
 	ColumnWidths []int
 
-	// Sort state
-	SortColumn    int    // -1 means no sort, otherwise index of sorted column
-	SortDirection string // "ASC" or "DESC"
-	NullsFirst    bool   // true = NULLS FIRST, false = NULLS LAST (default)
+	// Sort state (single + multi-column support)
+	SortColumn     int      // Primary sort column index (-1 = no sort)
+	SortDirection  string   // "ASC" or "DESC"
+	SortColumns    []int    // Multi-column sort (primary + secondary), empty = no sort
+	SortDirections []string // Corresponding directions
+	NullsFirst     bool     // true = NULLS FIRST, false = NULLS LAST (default)
 
 	// Horizontal scrolling state
 	LeftColOffset int // First visible column index
@@ -94,6 +97,7 @@ type TableView struct {
 	EditCol     int    // Column being edited
 	EditBuffer  string // Current edit text
 	EditCursor  int    // Cursor position within edit buffer
+	IsNewRow    bool   // True when editing a newly inserted row (INSERT vs UPDATE)
 
 	// Cached styles for performance (avoid recreating on every render)
 	cachedStyles *tableViewStyles
@@ -1174,19 +1178,49 @@ func (tv *TableView) JumpToLastColumn() {
 	}
 }
 
-// ToggleSort toggles sorting on the currently selected column
-func (tv *TableView) ToggleSort() {
-	if tv.SortColumn == tv.SelectedCol {
-		// Same column - toggle direction
-		if tv.SortDirection == "ASC" {
-			tv.SortDirection = "DESC"
+// ToggleSort toggles sorting on the currently selected column.
+// When shiftPressed is true, adds as secondary sort (multi-column).
+func (tv *TableView) ToggleSort(shiftPressed bool) {
+	if !shiftPressed {
+		// Primary sort: replace
+		if tv.SortColumn == tv.SelectedCol {
+			if tv.SortDirection == "ASC" {
+				tv.SortDirection = "DESC"
+			} else {
+				tv.SortDirection = "ASC"
+			}
 		} else {
+			tv.SortColumn = tv.SelectedCol
 			tv.SortDirection = "ASC"
 		}
+		tv.SortColumns = nil
+		tv.SortDirections = nil
 	} else {
-		// New column - start with ASC
-		tv.SortColumn = tv.SelectedCol
-		tv.SortDirection = "ASC"
+		// Secondary sort: add to multi-column list
+		if len(tv.SortColumns) == 0 && tv.SortColumn >= 0 {
+			tv.SortColumns = []int{tv.SortColumn}
+			tv.SortDirections = []string{tv.SortDirection}
+		}
+		found := false
+		for i, col := range tv.SortColumns {
+			if col == tv.SelectedCol {
+				if tv.SortDirections[i] == "ASC" {
+					tv.SortDirections[i] = "DESC"
+				} else {
+					tv.SortDirections[i] = "ASC"
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			tv.SortColumns = append(tv.SortColumns, tv.SelectedCol)
+			tv.SortDirections = append(tv.SortDirections, "ASC")
+		}
+		if len(tv.SortColumns) > 0 {
+			tv.SortColumn = tv.SortColumns[0]
+			tv.SortDirection = tv.SortDirections[0]
+		}
 	}
 }
 
@@ -1195,7 +1229,7 @@ func (tv *TableView) ToggleNullsFirst() {
 	tv.NullsFirst = !tv.NullsFirst
 }
 
-// GetSortColumn returns the current sort column name, or empty string if no sort
+// GetSortColumn returns the primary sort column name, or empty string if no sort
 func (tv *TableView) GetSortColumn() string {
 	if tv.SortColumn < 0 || tv.SortColumn >= len(tv.Columns) {
 		return ""
@@ -1203,9 +1237,34 @@ func (tv *TableView) GetSortColumn() string {
 	return tv.Columns[tv.SortColumn]
 }
 
-// GetSortDirection returns the current sort direction
+// GetSortDirection returns the primary sort direction
 func (tv *TableView) GetSortDirection() string {
 	return tv.SortDirection
+}
+
+// GetAllSortOptions returns all active sort options for multi-column ORDER BY.
+func (tv *TableView) GetAllSortOptions() []*metadata.SortOptions {
+	if len(tv.SortColumns) > 0 {
+		var opts []*metadata.SortOptions
+		for i, col := range tv.SortColumns {
+			if col >= 0 && col < len(tv.Columns) {
+				opts = append(opts, &metadata.SortOptions{
+					Column:     tv.Columns[col],
+					Direction:  tv.SortDirections[i],
+					NullsFirst: tv.NullsFirst,
+				})
+			}
+		}
+		return opts
+	}
+	if tv.SortColumn >= 0 {
+		return []*metadata.SortOptions{{
+			Column:     tv.Columns[tv.SortColumn],
+			Direction:  tv.SortDirection,
+			NullsFirst: tv.NullsFirst,
+		}}
+	}
+	return nil
 }
 
 // GetNullsFirst returns whether NULLS FIRST is enabled
@@ -1213,7 +1272,7 @@ func (tv *TableView) GetNullsFirst() bool {
 	return tv.NullsFirst
 }
 
-// ReverseSortDirection reverses the current sort direction
+// ReverseSortDirection reverses the primary sort direction
 // Returns true if there was an active sort to reverse
 func (tv *TableView) ReverseSortDirection() bool {
 	if tv.SortColumn < 0 {
@@ -1224,14 +1283,26 @@ func (tv *TableView) ReverseSortDirection() bool {
 	} else {
 		tv.SortDirection = "ASC"
 	}
+	for i, col := range tv.SortColumns {
+		if col == tv.SortColumn {
+			if tv.SortDirections[i] == "ASC" {
+				tv.SortDirections[i] = "DESC"
+			} else {
+				tv.SortDirections[i] = "ASC"
+			}
+			break
+		}
+	}
 	return true
 }
 
-// ClearSort clears the current sort
+// ClearSort clears all sorts
 func (tv *TableView) ClearSort() {
 	tv.SortColumn = -1
 	tv.SortDirection = "ASC"
 	tv.NullsFirst = false
+	tv.SortColumns = nil
+	tv.SortDirections = nil
 }
 
 // SearchLocal searches only loaded data

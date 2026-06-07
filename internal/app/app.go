@@ -2807,11 +2807,16 @@ func (a *App) executeCellUpdate(tv *components.TableView, newValue string, rowIn
 			sb.WriteString(" AND ")
 		}
 		sb.WriteString(quoteIdentifier(col))
-		sb.WriteString(" = ")
 		if rowIndex >= 0 && rowIndex < len(tv.Rows) && i < len(tv.Rows[rowIndex]) {
-			sb.WriteString(quoteValue(tv.Rows[rowIndex][i]))
+			val := tv.Rows[rowIndex][i]
+			if val == "NULL" || val == "" {
+				sb.WriteString(" IS NULL")
+			} else {
+				sb.WriteString(" = ")
+				sb.WriteString(quoteValue(val))
+			}
 		} else {
-			sb.WriteString("NULL")
+			sb.WriteString(" IS NULL")
 		}
 	}
 

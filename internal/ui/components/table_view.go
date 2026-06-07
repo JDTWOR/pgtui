@@ -724,34 +724,39 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int, visibl
 
 		value := row[i]
 
-		// Inline editing: if this is the cell being edited, show the edit buffer with cursor
+		// Inline editing: render the edit buffer with cursor highlight.
+		// Uses []rune to safely handle multi-byte characters.
 		if tv.Editing && rowIndex == tv.EditRow && i == tv.EditCol {
-			cellValue := tv.EditBuffer
-			if len(cellValue) > width-1 {
-				cellValue = cellValue[:width-1]
-			}
-			// Pad to full cell width and insert cursor at edit position
+			runes := []rune(tv.EditBuffer)
 			cursorPos := tv.EditCursor
-			if cursorPos > len(cellValue) {
-				cursorPos = len(cellValue)
+			if cursorPos > len(runes) {
+				cursorPos = len(runes)
 			}
-			// Build display: text before cursor + cursor block + text after cursor
-			beforeCursor := cellValue[:cursorPos]
-			afterCursor := cellValue[cursorPos:]
-			cursorChar := " "
-			if cursorPos < len(tv.EditBuffer) {
-				cursorChar = string(tv.EditBuffer[cursorPos])
+			// Build a padded display of width-1 runes
+			display := make([]rune, width-1)
+			for j := 0; j < width-1; j++ {
+				if j < len(runes) {
+					display[j] = runes[j]
+				} else {
+					display[j] = ' '
+				}
 			}
+			// Ensure cursor is within bounds
+			if cursorPos >= len(display) {
+				cursorPos = len(display) - 1
+			}
+			// Split into before/at/after cursor using rune slices (no byte-offset issues)
+			beforeRunes := string(display[:cursorPos])
+			atRune := string(display[cursorPos])
+			afterRunes := string(display[cursorPos+1:])
+
 			cursorStyle := lipgloss.NewStyle().
 				Background(tv.Theme.Cursor).
 				Foreground(tv.Theme.Background)
-			fullValue := runewidth.Truncate(beforeCursor+cursorStyle.Render(cursorChar)+afterCursor, width, "…")
-			// Pad to width manually
-			valWidth := runewidth.StringWidth(fullValue)
-			if valWidth < width {
-				fullValue += strings.Repeat(" ", width-valWidth)
-			}
-			b.WriteString(tv.cachedStyles.selectedCell.Render(fullValue))
+			baseStyle := tv.cachedStyles.selectedCell
+
+			rendered := baseStyle.Render(beforeRunes) + cursorStyle.Render(atRune) + baseStyle.Render(afterRunes)
+			b.WriteString(rendered)
 			b.WriteString(separator)
 			continue
 		}

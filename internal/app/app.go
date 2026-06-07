@@ -1424,8 +1424,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 
-				// Insert new row (Ctrl+Shift+N)
-				if msg.String() == "ctrl+shift+n" {
+				// Insert new row (Ctrl+Shift+I)
+				if msg.String() == "ctrl+shift+i" {
 					schema, table := a.getActiveTableNames(activeTable)
 					if schema != "" && table != "" && activeTable != nil {
 						// Create empty row
@@ -1451,8 +1451,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 
-				// Delete selected row (Ctrl+Shift+Delete)
-				if msg.String() == "ctrl+shift+delete" {
+				// Delete selected row (Ctrl+Shift+D)
+				if msg.String() == "ctrl+shift+d" {
 					schema, table := a.getActiveTableNames(activeTable)
 					if schema != "" && table != "" && activeTable != nil {
 						row := activeTable.SelectedRow

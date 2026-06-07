@@ -732,9 +732,9 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int, visibl
 			if cursorPos > len(runes) {
 				cursorPos = len(runes)
 			}
-			// Build a padded display of width-1 runes
-			display := make([]rune, width-1)
-			for j := 0; j < width-1; j++ {
+			// Build a padded display of `width` runes
+			display := make([]rune, width)
+			for j := 0; j < width; j++ {
 				if j < len(runes) {
 					display[j] = runes[j]
 				} else {

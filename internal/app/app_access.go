@@ -213,6 +213,12 @@ func (a *App) LoadTableDataWithFilter(filter models.Filter) tea.Cmd {
 	return a.loadTableDataWithFilter(filter)
 }
 
+// RefreshTableDataTab refreshes data for an existing table data tab by objectID ("schema.table").
+// Sets loading state and re-fetches data from the database.
+func (a *App) RefreshTableDataTab(objectID string) tea.Cmd {
+	return a.refreshTableDataTab(objectID)
+}
+
 // LoadObjectDetails loads details for a database object
 func (a *App) LoadObjectDetails(node *models.TreeNode) tea.Cmd {
 	switch node.Type {

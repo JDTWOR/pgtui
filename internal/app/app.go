@@ -4267,6 +4267,36 @@ func (a *App) loadTableDataForTab(schema, table, objectID string) tea.Cmd {
 	}
 }
 
+// refreshTableDataTab refreshes data for an existing table data tab by objectID ("schema.table").
+// Sets loading state on the tab and re-fetches the first 100 rows from the database.
+func (a *App) refreshTableDataTab(objectID string) tea.Cmd {
+	tab := a.resultTabs.GetTabByObjectID(objectID)
+	if tab == nil || tab.Type != components.TabTypeTableData || tab.Structure == nil {
+		return nil
+	}
+
+	tv := tab.Structure.GetTableView()
+	if tv == nil {
+		return nil
+	}
+
+	// Show loading state in the tab while refreshing
+	tv.IsLoading = true
+	tv.LoadingStart = time.Now()
+
+	// Parse "schema.table" from objectID
+	parts := strings.SplitN(objectID, ".", 2)
+	if len(parts) != 2 {
+		return nil
+	}
+	schema, table := parts[0], parts[1]
+
+	return tea.Batch(
+		a.loadTableDataForTab(schema, table, objectID),
+		a.executeSpinner.Tick,
+	)
+}
+
 // loadStructureMetadata loads columns, constraints, and indexes for a table asynchronously
 func (a *App) loadStructureMetadata(schema, table, objectID string) tea.Cmd {
 	return func() tea.Msg {

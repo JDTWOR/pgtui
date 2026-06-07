@@ -2,11 +2,24 @@ package delegates
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rebelice/lazypg/internal/app/messages"
 	"github.com/rebelice/lazypg/internal/models"
 	"github.com/rebelice/lazypg/internal/ui/components"
+)
+
+// Pre-compiled regex patterns for DML statement detection.
+// These extract the first table reference from INSERT, UPDATE, DELETE,
+// TRUNCATE, and REFRESH MATERIALIZED VIEW statements.
+var (
+	dmlInsertRe  = regexp.MustCompile(`(?i)\bINSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_.]*)`)
+	dmlUpdateRe  = regexp.MustCompile(`(?i)\bUPDATE\s+([a-zA-Z_][a-zA-Z0-9_.]*)`)
+	dmlDeleteRe  = regexp.MustCompile(`(?i)\bDELETE\s+FROM\s+([a-zA-Z_][a-zA-Z0-9_.]*)`)
+	dmlTruncateRe = regexp.MustCompile(`(?i)\bTRUNCATE(?:\s+TABLE)?\s+([a-zA-Z_][a-zA-Z0-9_.]*)`)
+	dmlRefreshMvRe = regexp.MustCompile(`(?i)\bREFRESH\s+MATERIALIZED\s+(?:VIEW\s+)?([a-zA-Z_][a-zA-Z0-9_.]*)`)
 )
 
 // QueryDelegate handles query execution and result messages.
@@ -85,7 +98,87 @@ func (d *QueryDelegate) handleQueryResult(msg messages.QueryResultMsg, app AppAc
 	// Complete the pending query with results
 	app.CompletePendingQuery(msg.SQL, msg.Result)
 
+	// Auto-refresh any existing table data tabs affected by this DML statement.
+	// After an INSERT/UPDATE/DELETE/TRUNCATE, the affected table tabs show stale data;
+	// this triggers a fresh SELECT for each matching tab.
+	cmds := d.refreshTabsForDML(msg.SQL, app)
+	if cmds != nil {
+		return true, cmds
+	}
+
 	return true, nil
+}
+
+// extractAffectedTableNames parses DML SQL and returns referenced table names.
+// Returns both schema-qualified ("schema.table") and simple ("table") names.
+func (d *QueryDelegate) extractAffectedTableNames(sql string) []string {
+	patterns := []*regexp.Regexp{
+		dmlInsertRe,
+		dmlUpdateRe,
+		dmlDeleteRe,
+		dmlTruncateRe,
+		dmlRefreshMvRe,
+	}
+
+	seen := make(map[string]bool)
+	var tables []string
+
+	for _, re := range patterns {
+		matches := re.FindAllStringSubmatch(sql, -1)
+		for _, m := range matches {
+			if len(m) > 1 {
+				name := m[1]
+				if !seen[name] {
+					tables = append(tables, name)
+					seen[name] = true
+				}
+			}
+		}
+	}
+
+	return tables
+}
+
+// refreshTabsForDML looks for existing TabTypeTableData tabs affected by the
+// given SQL and returns a batch command to refresh them. Returns nil if no
+// DML was detected or no matching tabs exist.
+//
+// For schema-qualified names ("schema.table") it matches directly against
+// tab ObjectIDs. For simple names ("table") it matches any tab whose
+// ObjectID ends with ".table".
+func (d *QueryDelegate) refreshTabsForDML(sql string, app AppAccess) tea.Cmd {
+	names := d.extractAffectedTableNames(sql)
+	if len(names) == 0 {
+		return nil
+	}
+
+	resultTabs := app.GetResultTabs()
+	var cmds []tea.Cmd
+
+	for _, name := range names {
+		if strings.Contains(name, ".") {
+			// Schema-qualified: match directly by ObjectID
+			if tab := resultTabs.GetTabByObjectID(name); tab != nil && tab.Type == components.TabTypeTableData {
+				if cmd := app.RefreshTableDataTab(name); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+		} else {
+			// Simple table name: match any tab whose ObjectID ends with ".<name>"
+			for _, tab := range resultTabs.GetAllTabs() {
+				if tab.Type == components.TabTypeTableData && strings.HasSuffix(tab.ObjectID, "."+name) {
+					if cmd := app.RefreshTableDataTab(tab.ObjectID); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
+			}
+		}
+	}
+
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
 }
 
 // handleSaveObject handles object definition save request.

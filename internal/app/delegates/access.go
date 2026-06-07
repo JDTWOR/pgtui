@@ -141,6 +141,10 @@ type DataAccess interface {
 
 	// PrefetchData prefetches table data in background
 	PrefetchData(schema, table string, offset, limit int, sortCol, sortDir string, nullsFirst bool) tea.Cmd
+
+	// RefreshTableDataTab refreshes data for an existing table data tab by objectID ("schema.table").
+	// Sets loading state on the tab and re-fetches data from the database.
+	RefreshTableDataTab(objectID string) tea.Cmd
 }
 
 // QueryAccess provides query execution operations

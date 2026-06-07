@@ -130,9 +130,19 @@ func (d *QueryDelegate) handleQueryResult(msg messages.QueryResultMsg, app AppAc
 	return true, nil
 }
 
+// dequoteSQL strips double-quote marks from SQL identifiers so that regex
+// patterns can match both quoted ("schema"."table") and unquoted (schema.table) forms.
+func dequoteSQL(sql string) string {
+	return strings.ReplaceAll(sql, `"`, "")
+}
+
 // extractAffectedTableNames parses DML SQL and returns referenced table names.
 // Returns both schema-qualified ("schema.table") and simple ("table") names.
+// Handles both quoted ("public"."users") and unquoted (public.users) identifiers.
 func (d *QueryDelegate) extractAffectedTableNames(sql string) []string {
+	// Strip double quotes so regex can match quoted identifiers
+	cleanSQL := dequoteSQL(sql)
+
 	patterns := []*regexp.Regexp{
 		dmlInsertRe,
 		dmlUpdateRe,
@@ -145,7 +155,7 @@ func (d *QueryDelegate) extractAffectedTableNames(sql string) []string {
 	var tables []string
 
 	for _, re := range patterns {
-		matches := re.FindAllStringSubmatch(sql, -1)
+		matches := re.FindAllStringSubmatch(cleanSQL, -1)
 		for _, m := range matches {
 			if len(m) > 1 {
 				name := m[1]

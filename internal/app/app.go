@@ -494,6 +494,43 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.sqlEditor.SetContent(msg.Content)
 		return a, nil
 
+	case components.ExplainQueryMsg:
+		// Execute EXPLAIN ANALYZE for the given query
+		if a.state.ActiveConnection == nil {
+			a.ShowError("No Connection", "Please connect to a database first")
+			return a, nil
+		}
+
+		explainSQL := "EXPLAIN (ANALYZE, COSTS, VERBOSE, BUFFERS, FORMAT TEXT) " + msg.SQL
+
+		// Create pending tab and execute asynchronously
+		a.resultTabs.StartPendingQuery(explainSQL)
+		a.state.FocusArea = models.FocusDataPanel
+		a.updatePanelStyles()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		a.executeCancelFn = cancel
+
+		return a, tea.Batch(
+			a.executeSpinner.Tick,
+			func() tea.Msg {
+				conn, err := a.connectionManager.GetActive()
+				if err != nil {
+					return messages.QueryResultMsg{
+						SQL: explainSQL,
+						Result: models.QueryResult{
+							Error: fmt.Errorf("no active connection: %w", err),
+						},
+					}
+				}
+				result := query.Execute(ctx, conn.Pool.GetPool(), explainSQL)
+				return messages.QueryResultMsg{
+					SQL:    explainSQL,
+					Result: result,
+				}
+			},
+		)
+
 	case components.ExecuteQueryMsg:
 		// Handle query execution from SQL editor
 		if a.state.ActiveConnection == nil {

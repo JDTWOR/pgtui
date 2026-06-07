@@ -33,6 +33,11 @@ type OpenExternalEditorMsg struct {
 	Content string
 }
 
+// ExplainQueryMsg is sent when the user requests EXPLAIN ANALYZE for a query.
+type ExplainQueryMsg struct {
+	SQL string
+}
+
 // ExternalEditorResultMsg contains the result from external editor
 type ExternalEditorResultMsg struct {
 	Content string
@@ -767,6 +772,17 @@ func (e *SQLEditor) Update(msg tea.KeyMsg) (*SQLEditor, tea.Cmd) {
 		return e, func() tea.Msg {
 			return OpenExternalEditorMsg{Content: e.GetContent()}
 		}
+
+	// EXPLAIN ANALYZE
+	case "ctrl+shift+e":
+		sql := e.GetCurrentStatement()
+		if sql != "" {
+			e.AddToHistory(e.GetContent())
+			return e, func() tea.Msg {
+				return ExplainQueryMsg{SQL: sql}
+			}
+		}
+		return e, nil
 
 	// Dismiss on escape when no popup
 	case "esc":

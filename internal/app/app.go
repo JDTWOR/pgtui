@@ -1331,6 +1331,47 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 
+				// Inline cell editing: intercept all keys when editing a cell
+				if activeTable.Editing {
+					// Save edit position BEFORE HandleEditKey resets them
+					savedRow := activeTable.EditRow
+					savedCol := activeTable.EditCol
+					handled, newValue, committed, cancelled := activeTable.HandleEditKey(msg)
+					if !handled {
+						return a, nil
+					}
+					if cancelled {
+						return a, nil
+					}
+					if committed {
+						cmd := a.executeCellUpdate(activeTable, newValue, savedRow, savedCol)
+						if cmd != nil {
+							return a, cmd
+						}
+						return a, nil
+					}
+					return a, nil
+				}
+
+				// Enter edit mode on a cell
+				if msg.String() == "enter" {
+					schema, table := a.getActiveTableNames(activeTable)
+					if schema != "" && table != "" {
+						row := activeTable.TopRow + activeTable.SelectedRow
+						col := activeTable.SelectedCol
+						if row >= 0 && row < len(activeTable.Rows) && col >= 0 && col < len(activeTable.Columns) {
+							// Set table identity for UPDATE generation
+							activeTable.TableSchema = schema
+							activeTable.TableName = table
+							activeTable.StartEdit(row, col)
+							return a, nil
+						}
+					}
+
+					// If not on a valid cell, consume enter
+					return a, nil
+				}
+
 				// Toggle relative line numbers
 				if msg.String() == "ctrl+n" {
 					activeTable.ToggleRelativeNumbers()
@@ -2643,6 +2684,90 @@ func (a *App) renderDataPanel(width, height int) string {
 		Align(lipgloss.Center, lipgloss.Center)
 
 	return placeholderStyle.Render("No data to display\n\nPress Ctrl+E to open SQL editor")
+}
+
+// getActiveTableNames returns the schema and table name for the active table view.
+func (a *App) getActiveTableNames(tv *components.TableView) (string, string) {
+	if tv.TableSchema != "" && tv.TableName != "" {
+		return tv.TableSchema, tv.TableName
+	}
+	// Fallback: try legacy currentTable
+	if a.currentTable != "" {
+		parts := strings.Split(a.currentTable, ".")
+		if len(parts) == 2 {
+			return parts[0], parts[1]
+		}
+	}
+	return "", ""
+}
+
+// executeCellUpdate generates and executes an UPDATE SQL for an edited cell.
+func (a *App) executeCellUpdate(tv *components.TableView, newValue string, rowIndex, colIndex int) tea.Cmd {
+	if tv.TableSchema == "" || tv.TableName == "" {
+		a.ShowError("Edit Error", "Cannot update: table identity unknown")
+		return nil
+	}
+
+	if colIndex < 0 || colIndex >= len(tv.Columns) {
+		return nil
+	}
+
+	colName := tv.Columns[colIndex]
+	if colName == "" {
+		return nil
+	}
+
+	// Build UPDATE SQL with all row values as WHERE condition
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("UPDATE %s.%s SET %s = ",
+		quoteIdentifier(tv.TableSchema),
+		quoteIdentifier(tv.TableName),
+		quoteIdentifier(colName)))
+	sb.WriteString(quoteValue(newValue))
+	sb.WriteString(" WHERE ")
+
+	for i, col := range tv.Columns {
+		if i > 0 {
+			sb.WriteString(" AND ")
+		}
+		sb.WriteString(quoteIdentifier(col))
+		sb.WriteString(" = ")
+		if rowIndex >= 0 && rowIndex < len(tv.Rows) && i < len(tv.Rows[rowIndex]) {
+			sb.WriteString(quoteValue(tv.Rows[rowIndex][i]))
+		} else {
+			sb.WriteString("NULL")
+		}
+	}
+
+	sql := sb.String()
+
+	// Execute asynchronously
+	conn, err := a.connectionManager.GetActive()
+	if err != nil {
+		a.ShowError("Edit Error", "No active connection")
+		return nil
+	}
+
+	return func() tea.Msg {
+		result := query.Execute(context.Background(), conn.Pool.GetPool(), sql)
+		return messages.QueryResultMsg{
+			SQL:    sql,
+			Result: result,
+		}
+	}
+}
+
+// quoteIdentifier wraps an identifier in double quotes (SQL standard).
+func quoteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// quoteValue wraps a value for SQL, handling NULL and string escaping.
+func quoteValue(val string) string {
+	if val == "NULL" || val == "" {
+		return "NULL"
+	}
+	return "'" + strings.ReplaceAll(val, "'", "''") + "'"
 }
 
 // renderDMLSummary renders a compact result summary for DML queries.

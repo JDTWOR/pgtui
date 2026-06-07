@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
@@ -82,6 +83,17 @@ type TableView struct {
 	// Prefetch state
 	IsPrefetching     bool // Whether a prefetch is in progress
 	PrefetchThreshold int  // Distance from end to trigger prefetch
+
+	// Table identity (set by caller for UPDATE generation)
+	TableSchema string
+	TableName   string
+
+	// Inline cell editing state
+	Editing     bool   // True when editing a cell
+	EditRow     int    // Row being edited
+	EditCol     int    // Column being edited
+	EditBuffer  string // Current edit text
+	EditCursor  int    // Cursor position within edit buffer
 
 	// Cached styles for performance (avoid recreating on every render)
 	cachedStyles *tableViewStyles
@@ -207,6 +219,99 @@ func (tv *TableView) SetData(columns []string, rows [][]string, totalRows int) {
 	tv.Rows = rows
 	tv.TotalRows = totalRows
 	tv.calculateColumnWidths()
+	// Cancel any in-progress edit on data change
+	if tv.Editing {
+		tv.CancelEdit()
+	}
+}
+
+// =============================================================================
+// Inline Cell Editing
+// =============================================================================
+
+// StartEdit enters edit mode for the specified cell.
+func (tv *TableView) StartEdit(row, col int) {
+	if row < 0 || row >= len(tv.Rows) || col < 0 || col >= len(tv.Columns) {
+		return
+	}
+	tv.Editing = true
+	tv.EditRow = row
+	tv.EditCol = col
+	tv.EditBuffer = tv.Rows[row][col]
+	tv.EditCursor = len(tv.EditBuffer)
+}
+
+// CancelEdit exits edit mode without saving.
+func (tv *TableView) CancelEdit() {
+	tv.Editing = false
+	tv.EditRow = -1
+	tv.EditCol = -1
+	tv.EditBuffer = ""
+	tv.EditCursor = 0
+}
+
+// HandleEditKey processes a key event when in edit mode.
+// Returns (handled, newValue, committed, cancelled).
+func (tv *TableView) HandleEditKey(msg tea.KeyMsg) (handled bool, newValue string, committed bool, cancelled bool) {
+	if !tv.Editing {
+		return false, "", false, false
+	}
+
+	switch msg.String() {
+	case "enter":
+		// Commit edit
+		newVal := tv.EditBuffer
+		tv.CancelEdit()
+		return true, newVal, true, false
+
+	case "esc":
+		tv.CancelEdit()
+		return true, "", false, true
+
+	case "backspace":
+		if tv.EditCursor > 0 {
+			tv.EditBuffer = tv.EditBuffer[:tv.EditCursor-1] + tv.EditBuffer[tv.EditCursor:]
+			tv.EditCursor--
+		}
+		return true, "", false, false
+
+	case "delete":
+		if tv.EditCursor < len(tv.EditBuffer) {
+			tv.EditBuffer = tv.EditBuffer[:tv.EditCursor] + tv.EditBuffer[tv.EditCursor+1:]
+		}
+		return true, "", false, false
+
+	case "left":
+		if tv.EditCursor > 0 {
+			tv.EditCursor--
+		}
+		return true, "", false, false
+
+	case "right":
+		if tv.EditCursor < len(tv.EditBuffer) {
+			tv.EditCursor++
+		}
+		return true, "", false, false
+
+	case "home":
+		tv.EditCursor = 0
+		return true, "", false, false
+
+	case "end":
+		tv.EditCursor = len(tv.EditBuffer)
+		return true, "", false, false
+
+	default:
+		// Printable characters
+		if len(msg.String()) == 1 {
+			ch := rune(msg.String()[0])
+			if ch >= 32 && ch <= 126 {
+				tv.EditBuffer = tv.EditBuffer[:tv.EditCursor] + string(ch) + tv.EditBuffer[tv.EditCursor:]
+				tv.EditCursor++
+			}
+		}
+		return true, "", false, false
+	}
 }
 
 // getLineNumberDigits returns the number of digits needed for line numbers
@@ -618,6 +723,38 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int, visibl
 		}
 
 		value := row[i]
+
+		// Inline editing: if this is the cell being edited, show the edit buffer with cursor
+		if tv.Editing && rowIndex == tv.EditRow && i == tv.EditCol {
+			cellValue := tv.EditBuffer
+			if len(cellValue) > width-1 {
+				cellValue = cellValue[:width-1]
+			}
+			// Pad to full cell width and insert cursor at edit position
+			cursorPos := tv.EditCursor
+			if cursorPos > len(cellValue) {
+				cursorPos = len(cellValue)
+			}
+			// Build display: text before cursor + cursor block + text after cursor
+			beforeCursor := cellValue[:cursorPos]
+			afterCursor := cellValue[cursorPos:]
+			cursorChar := " "
+			if cursorPos < len(tv.EditBuffer) {
+				cursorChar = string(tv.EditBuffer[cursorPos])
+			}
+			cursorStyle := lipgloss.NewStyle().
+				Background(tv.Theme.Cursor).
+				Foreground(tv.Theme.Background)
+			fullValue := runewidth.Truncate(beforeCursor+cursorStyle.Render(cursorChar)+afterCursor, width, "…")
+			// Pad to width manually
+			valWidth := runewidth.StringWidth(fullValue)
+			if valWidth < width {
+				fullValue += strings.Repeat(" ", width-valWidth)
+			}
+			b.WriteString(tv.cachedStyles.selectedCell.Render(fullValue))
+			b.WriteString(separator)
+			continue
+		}
 
 		// CRITICAL: Truncate FIRST before any string processing!
 		// Cells can contain megabytes of data (e.g., JSONB columns)

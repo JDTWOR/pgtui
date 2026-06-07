@@ -124,6 +124,33 @@ func ListViews(ctx context.Context, pool *connection.Pool, schema string) ([]Vie
 	return views, nil
 }
 
+// GetAllTableRowCounts returns estimated row counts for all user tables across all schemas.
+// Uses pg_stat_user_tables for fast estimates (no full COUNT(*) scan).
+func GetAllTableRowCounts(ctx context.Context, pool *connection.Pool) (map[string]int64, error) {
+	query := `
+		SELECT schemaname AS schema_name,
+			   relname AS table_name,
+			   n_live_tup::bigint AS row_count
+		FROM pg_stat_user_tables
+	`
+	rows, err := pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get table row counts: %w", err)
+	}
+
+	counts := make(map[string]int64)
+	for _, row := range rows {
+		schema := toString(row["schema_name"])
+		table := toString(row["table_name"])
+		count, ok := row["row_count"].(int64)
+		if ok {
+			key := schema + "." + table
+			counts[key] = count
+		}
+	}
+	return counts, nil
+}
+
 // GetTableRowCount returns the estimated row count for a table
 func GetTableRowCount(ctx context.Context, pool *connection.Pool, schema, table string) (int64, error) {
 	query := `

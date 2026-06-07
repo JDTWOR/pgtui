@@ -147,6 +147,134 @@ func (e *SQLEditor) GetContent() string {
 	return strings.Join(e.lines, "\n")
 }
 
+// FormatSQL formats the current SQL content with basic rules:
+// - Keywords → UPPERCASE
+// - Major clauses (FROM, WHERE, ORDER BY, etc.) get a newline before them
+func (e *SQLEditor) FormatSQL() {
+	content := e.GetContent()
+	if content == "" {
+		return
+	}
+
+	// Lowercase clauses that should start a new line
+	newlineClauses := []string{
+		"select", "from", "where", "order by", "group by", "having",
+		"limit", "offset", "union", "intersect", "except",
+		"join", "inner join", "left join", "right join", "full join",
+		"cross join", "on",
+	}
+
+	// Tokenize: split into words preserving whitespace and strings
+	type token struct {
+		text string
+		kw   bool // is a keyword
+	}
+	var tokens []token
+	current := strings.Builder{}
+	inString := false
+
+	flush := func() {
+		if current.Len() > 0 {
+			word := current.String()
+			current.Reset()
+			upper := strings.ToUpper(word)
+			_, isKW := sqlKeywords[upper]
+			tokens = append(tokens, token{text: word, kw: isKW})
+		}
+	}
+
+	for i := 0; i < len(content); i++ {
+		ch := content[i]
+		if ch == '\'' {
+			inString = !inString
+			current.WriteByte(ch)
+			continue
+		}
+		if inString {
+			current.WriteByte(ch)
+			continue
+		}
+		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
+			flush()
+			if ch == '\n' || ch == '\r' {
+				continue // skip existing newlines
+			}
+			tokens = append(tokens, token{text: " ", kw: false})
+			continue
+		}
+		// Handle punctuation
+		if ch == '(' || ch == ')' || ch == ',' || ch == ';' {
+			flush()
+			tokens = append(tokens, token{text: string(ch), kw: false})
+			continue
+		}
+		current.WriteByte(ch)
+	}
+	flush()
+
+	// Build formatted output
+	var result strings.Builder
+	lastLineStart := true
+	indent := 0
+
+	for i, tok := range tokens {
+		text := tok.text
+		upper := strings.ToUpper(text)
+
+		// Check if this is a newline clause
+		needsNewline := false
+		if tok.kw {
+			for _, clause := range newlineClauses {
+				if strings.EqualFold(upper, clause) || strings.HasPrefix(upper+" ", strings.ToUpper(clause)+" ") {
+					needsNewline = true
+					break
+				}
+			}
+		}
+
+		if needsNewline && !lastLineStart {
+			result.WriteString("\n")
+			lastLineStart = true
+		}
+
+		if lastLineStart && tok.text != " " {
+			for j := 0; j < indent; j++ {
+				result.WriteString("    ")
+			}
+			lastLineStart = false
+		}
+
+		if tok.kw {
+			result.WriteString(upper)
+		} else {
+			result.WriteString(text)
+		}
+
+		// Track parentheses for indentation
+		if text == "(" {
+			indent++
+		} else if text == ")" {
+			if indent > 0 {
+				indent--
+			}
+		}
+
+		// Add space between tokens (not after open paren or before close paren)
+		if i+1 < len(tokens) && text != " " {
+			next := tokens[i+1].text
+			if next != " " && next != ")" && next != "," && text != "(" {
+				result.WriteString(" ")
+			}
+		}
+	}
+
+	result.WriteString("\n")
+	e.SetContent(result.String())
+	// Position cursor at end
+	e.cursorRow = len(e.lines) - 1
+	e.cursorCol = len(e.lines[e.cursorRow])
+}
+
 // SetContent sets the editor content
 func (e *SQLEditor) SetContent(content string) {
 	if content == "" {
@@ -782,6 +910,11 @@ func (e *SQLEditor) Update(msg tea.KeyMsg) (*SQLEditor, tea.Cmd) {
 				return ExplainQueryMsg{SQL: sql}
 			}
 		}
+		return e, nil
+
+	// Format SQL
+	case "ctrl+shift+f":
+		e.FormatSQL()
 		return e, nil
 
 	// Dismiss on escape when no popup

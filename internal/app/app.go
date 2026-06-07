@@ -1317,6 +1317,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 
+				// Copy row as INSERT statement (Ctrl+I)
+				if msg.String() == "ctrl+i" {
+					if activeTable != nil {
+						row := activeTable.SelectedRow
+						schema, table := a.getActiveTableNames(activeTable)
+						if schema != "" && table != "" && row >= 0 && row < len(activeTable.Rows) {
+							insertSQL := generateInsertSQL(schema, table, activeTable.Columns, activeTable.Rows[row])
+							if err := clipboard.WriteAll(insertSQL); err == nil {
+								log.Println("Copied row as INSERT to clipboard")
+							}
+						}
+					}
+					return a, nil
+				}
+
 				// Handle yank: y = copy current cell, Y = copy preview pane content
 				if msg.String() == "y" {
 					if activeTable != nil {
@@ -2836,6 +2851,31 @@ func (a *App) executeCellUpdate(tv *components.TableView, newValue string, rowIn
 			Result: result,
 		}
 	}
+}
+
+// generateInsertSQL builds an INSERT statement for a single row.
+func generateInsertSQL(schema, table string, columns []string, row []string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("INSERT INTO %s.%s (", quoteIdentifier(schema), quoteIdentifier(table)))
+	for i, col := range columns {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(quoteIdentifier(col))
+	}
+	sb.WriteString(") VALUES (")
+	for i, val := range row {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		if val == "NULL" || val == "" {
+			sb.WriteString("NULL")
+		} else {
+			sb.WriteString("'" + strings.ReplaceAll(val, "'", "''") + "'")
+		}
+	}
+	sb.WriteString(");")
+	return sb.String()
 }
 
 // quoteIdentifier wraps an identifier in double quotes (SQL standard).

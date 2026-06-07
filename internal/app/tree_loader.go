@@ -29,6 +29,9 @@ func (a *App) loadTree() tea.Msg {
 	// Load extensions (usually fast, small number)
 	extensions, _ := metadata.ListExtensions(ctx, conn.Pool)
 
+	// Load estimated row counts for all tables (fast, from pg_stat_user_tables)
+	rowCounts, _ := metadata.GetAllTableRowCounts(ctx, conn.Pool)
+
 	// Get all schema objects in ONE query
 	schemaObjects, err := metadata.GetAllSchemaObjects(ctx, conn.Pool)
 	if err != nil {
@@ -148,6 +151,12 @@ func (a *App) loadTree() tea.Msg {
 				)
 				tableNode.Selectable = true
 				tableNode.Loaded = false // Columns/indexes still lazy load
+				// Store estimated row count for display
+				if count, ok := rowCounts[schemaName+"."+tableName]; ok {
+					tableNode.Metadata = map[string]interface{}{
+						"row_count": count,
+					}
+				}
 				tablesGroup.AddChild(tableNode)
 			}
 			tablesGroup.Loaded = true // Group has all children

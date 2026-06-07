@@ -773,16 +773,22 @@ func (e *SQLEditor) Update(msg tea.KeyMsg) (*SQLEditor, tea.Cmd) {
 		e.showSuggestions = false
 
 	default:
-		// Handle printable characters
+		// Handle printable characters and newlines (for paste)
 		if len(msg.String()) == 1 {
 			ch := rune(msg.String()[0])
-			if ch >= 32 && ch <= 126 {
+			if ch == '\n' || ch == '\r' {
+				e.InsertNewline()
+			} else if ch >= 32 && ch <= 126 {
 				e.InsertChar(ch)
 				e.triggerSuggestions()
 			}
 		} else if msg.Type == tea.KeyRunes {
 			for _, r := range msg.Runes {
-				e.InsertChar(r)
+				if r == '\n' || r == '\r' {
+					e.InsertNewline()
+				} else {
+					e.InsertChar(r)
+				}
 			}
 			e.triggerSuggestions()
 		}

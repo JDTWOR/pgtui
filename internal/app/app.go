@@ -2433,6 +2433,30 @@ func (a *App) renderRightPanel(width, height int) string {
 
 // renderDataPanel renders the data panel (table view or structure view)
 func (a *App) renderDataPanel(width, height int) string {
+	// Success toast takes precedence over everything — overlays the data panel
+	if a.showSuccessToast && a.successToastMsg != "" {
+		iconStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(a.theme.Success)
+		msgStyle := lipgloss.NewStyle().
+			Foreground(a.theme.Foreground)
+		hintStyle := lipgloss.NewStyle().
+			Foreground(a.theme.Comment).
+			Italic(true)
+
+		lines := []string{
+			"",
+			iconStyle.Render("✓ Success"),
+			"",
+			msgStyle.Render(a.successToastMsg),
+			"",
+			"",
+			hintStyle.Render("Press any key to dismiss"),
+		}
+		content := lipgloss.JoinVertical(lipgloss.Center, lines...)
+		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
+	}
+
 	// Show loading spinner when loading object details (function, sequence, etc.)
 	if a.isLoadingObjectDetails {
 		spinnerView := a.executeSpinner.View()
@@ -2623,31 +2647,6 @@ func (a *App) renderDataPanel(width, height int) string {
 		a.codeEditor.Width = width
 		a.codeEditor.Height = height
 		return a.codeEditor.View()
-	}
-
-	// Success toast notification (shown after DML queries instead of result tabs)
-	if a.showSuccessToast && a.successToastMsg != "" {
-		// Success icon + message
-		iconStyle := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(a.theme.Success)
-		msgStyle := lipgloss.NewStyle().
-			Foreground(a.theme.Foreground)
-		hintStyle := lipgloss.NewStyle().
-			Foreground(a.theme.Comment).
-			Italic(true)
-
-		lines := []string{
-			"",
-			iconStyle.Render("✓ Success"),
-			"",
-			msgStyle.Render(a.successToastMsg),
-			"",
-			"",
-			hintStyle.Render("Press any key to dismiss"),
-		}
-		content := lipgloss.JoinVertical(lipgloss.Center, lines...)
-		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 	}
 
 	// No data - show placeholder

@@ -463,16 +463,20 @@ func (a *App) GetSpinnerTickCmd() tea.Cmd {
 	return a.executeSpinner.Tick
 }
 
-// ShowSuccessToast shows a brief success notification in the data panel.
+// ShowSuccessToast shows a success notification overlay after DML queries.
 func (a *App) ShowSuccessToast(message string) {
-	a.showSuccessToast = true
-	a.successToastMsg = message
+	if a.successNotification != nil {
+		a.successNotification.SetMessage(message)
+	}
+	a.showSuccessNotification = true
 }
 
-// DismissSuccessToast hides the success toast.
+// DismissSuccessToast hides the success notification overlay.
 func (a *App) DismissSuccessToast() {
-	a.showSuccessToast = false
-	a.successToastMsg = ""
+	a.showSuccessNotification = false
+	if a.successNotification != nil {
+		a.successNotification.SetMessage("")
+	}
 }
 
 // PopulateMetadataCache rebuilds the autocomplete metadata cache from the tree root.

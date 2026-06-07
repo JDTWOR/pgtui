@@ -67,6 +67,10 @@ type App struct {
 	showError    bool
 	errorOverlay *components.ErrorOverlay
 
+	// Success notification (toast after DML queries)
+	showSuccessNotification bool
+	successNotification     *components.SuccessNotification
+
 	// Phase 3: Navigation tree
 	treeView *components.TreeView
 
@@ -130,10 +134,6 @@ type App struct {
 	// Query execution state
 	executeCancelFn context.CancelFunc
 	executeSpinner  spinner.Model
-
-	// Success toast notification
-	showSuccessToast bool
-	successToastMsg  string
 
 	// Cached styles for performance (avoid recreating on every render)
 	cachedStyles *appStyles
@@ -284,6 +284,7 @@ func New(cfg *config.Config) *App {
 		discoverer:        discovery.NewDiscoverer(),
 		connectionDialog:  components.NewConnectionDialog(th),
 		errorOverlay:      components.NewErrorOverlay(th),
+		successNotification: components.NewSuccessNotification(th),
 		treeView:          components.NewTreeView(emptyRoot, th),
 		commandRegistry:   registry,
 		commandPalette:    components.NewCommandPalette(th),
@@ -813,8 +814,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.KeyMsg:
-		// Dismiss success toast on any key
-		if a.showSuccessToast {
+		// Dismiss success notification on any key
+		if a.showSuccessNotification {
 			a.DismissSuccessToast()
 			// Continue processing the key (don't return early)
 		}
@@ -2096,6 +2097,15 @@ func (a *App) getActiveTableView() *components.TableView {
 
 // View implements tea.Model
 func (a *App) View() string {
+	// If success notification is showing, render it centered on top of everything
+	if a.showSuccessNotification && a.successNotification != nil {
+		return lipgloss.Place(
+			a.state.Width, a.state.Height,
+			lipgloss.Center, lipgloss.Center,
+			a.successNotification.View(),
+		)
+	}
+
 	// If error overlay is showing, render it centered on top of everything
 	if a.showError {
 		return lipgloss.Place(
@@ -2433,30 +2443,6 @@ func (a *App) renderRightPanel(width, height int) string {
 
 // renderDataPanel renders the data panel (table view or structure view)
 func (a *App) renderDataPanel(width, height int) string {
-	// Success toast takes precedence over everything — overlays the data panel
-	if a.showSuccessToast && a.successToastMsg != "" {
-		iconStyle := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(a.theme.Success)
-		msgStyle := lipgloss.NewStyle().
-			Foreground(a.theme.Foreground)
-		hintStyle := lipgloss.NewStyle().
-			Foreground(a.theme.Comment).
-			Italic(true)
-
-		lines := []string{
-			"",
-			iconStyle.Render("✓ Success"),
-			"",
-			msgStyle.Render(a.successToastMsg),
-			"",
-			"",
-			hintStyle.Render("Press any key to dismiss"),
-		}
-		content := lipgloss.JoinVertical(lipgloss.Center, lines...)
-		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
-	}
-
 	// Show loading spinner when loading object details (function, sequence, etc.)
 	if a.isLoadingObjectDetails {
 		spinnerView := a.executeSpinner.View()
